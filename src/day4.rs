@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 pub fn run() {
-    let input = include_str!("day4.txt");
+    let input = include_str!("../data/day4.txt");
     let a = check_input(input);
     let b = check_input2(input);
 
@@ -119,14 +119,14 @@ mod tests {
 
     #[test]
     fn test_day4() {
-        let got = check_input(include_str!("day4_test.txt"));
+        let got = check_input(include_str!("../data/day4_test.txt"));
 
         assert_eq!(got, 2);
     }
 
     #[test]
     fn test_day4_part2() {
-        let got = check_input2(include_str!("day4_test.txt"));
+        let got = check_input2(include_str!("../data/day4_test.txt"));
 
         assert_eq!(got, 2);
     }

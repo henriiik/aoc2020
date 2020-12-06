@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 pub fn run() {
-    let input = include_str!("day5.txt");
+    let input = include_str!("../data/day5.txt");
     let a = check_input(input).unwrap();
     let b = check_input2(input).unwrap();
 
@@ -90,8 +90,8 @@ mod tests {
 
     #[test]
     fn test_day5() {
-        let got = check_input2(include_str!("day5.txt"));
+        let got = check_input2(include_str!("../data/day5.txt")).unwrap();
 
-        assert_eq!(got, 2);
+        assert_eq!(got, 696);
     }
 }

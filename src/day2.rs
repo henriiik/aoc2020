@@ -1,5 +1,5 @@
 pub fn run() {
-    let input = include_str!("day2.txt")
+    let input = include_str!("../data/day2.txt")
         .trim()
         .split_terminator('\n')
         .map(|input| {

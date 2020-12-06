@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 pub fn run() {
-    let input = include_str!("day1.txt")
+    let input = include_str!("../data/day1.txt")
         .split_ascii_whitespace()
         .map(|a| u64::from_str(a).unwrap())
         .collect::<Vec<_>>();
