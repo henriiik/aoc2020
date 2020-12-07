@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub fn run() {
     let input = include_str!("../data/day6.txt");

@@ -15,13 +15,13 @@ pub fn run() {
         (n, x)
     });
 
-    let b = calc(&input, 1, 1);
-    let c = calc(&input, 3, 1);
-    let d = calc(&input, 5, 1);
-    let e = calc(&input, 7, 1);
-    let f = calc(&input, 1, 2);
+    let b = calc(&input, 1, 1)
+        * calc(&input, 3, 1)
+        * calc(&input, 5, 1)
+        * calc(&input, 7, 1)
+        * calc(&input, 1, 2);
 
-    println!("day 3: {}, {}", a.0, b * c * d * e * f);
+    println!("day 3: {}, {}", a.0, b);
 }
 
 fn calc(input: &[&str], right: usize, down: usize) -> usize {
