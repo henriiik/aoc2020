@@ -3,9 +3,9 @@ use std::collections::{HashMap, HashSet};
 pub fn run() {
     let input = include_str!("../data/day7.txt");
     let a = check_input(input).len();
-    // let b = check_input2(input);
+    let b = check_input2(input);
 
-    println!("day 7: {}, {}", a, a);
+    println!("day 7: {}, {}", a, b);
 }
 
 fn parse_input(input: &str) -> Vec<(&str, HashMap<&str, usize>)> {
@@ -15,10 +15,7 @@ fn parse_input(input: &str) -> Vec<(&str, HashMap<&str, usize>)> {
         .map(|rule| {
             let mut rule = rule.split(" bags contain ");
             let container_color = rule.next().unwrap();
-            // dbg!(container_color);
-
             let can_contain = rule.next().unwrap();
-            // dbg!(contains);
 
             let can_contain = if can_contain.starts_with("no") {
                 HashMap::new()
@@ -29,12 +26,11 @@ fn parse_input(input: &str) -> Vec<(&str, HashMap<&str, usize>)> {
                         let mut containee = containee.splitn(2, ' ');
                         let count: usize = containee.next().unwrap().parse().unwrap();
                         let color = containee.next().unwrap().split(" bag").next().unwrap();
+
                         (color, count)
                     })
                     .collect::<HashMap<_, _>>()
             };
-
-            // dbg!(&can_contain);
 
             (container_color, can_contain)
         })
@@ -42,10 +38,10 @@ fn parse_input(input: &str) -> Vec<(&str, HashMap<&str, usize>)> {
 }
 
 fn check_input(input: &str) -> HashSet<&str> {
-    let can_contain: HashMap<&str, HashSet<&str>> = parse_input(input).into_iter().fold(
+    let contains_by_color: HashMap<&str, HashSet<&str>> = parse_input(input).into_iter().fold(
         HashMap::new(),
-        |mut map, (container_color, can_contain)| {
-            for (contained_color, _) in can_contain {
+        |mut map, (container_color, contains)| {
+            for (contained_color, _) in contains {
                 map.entry(contained_color)
                     .or_default()
                     .insert(container_color);
@@ -54,33 +50,25 @@ fn check_input(input: &str) -> HashSet<&str> {
         },
     );
 
-    // dbg!(&can_contain);
-
-    let mut unchecked_candidates = can_contain.get("shiny gold").unwrap().to_owned();
-    let mut checked_candidates = HashSet::new();
+    let mut outermost_bag_colors = contains_by_color.get("shiny gold").unwrap().to_owned();
+    let mut checked_bag_colors = HashSet::new();
 
     for _ in 0..1000 {
-        let diff = unchecked_candidates
-            .difference(&checked_candidates)
+        let unchecked_bag_colors = outermost_bag_colors
+            .difference(&checked_bag_colors)
             .cloned()
             .collect::<HashSet<_>>();
-        let new_candidates = diff
-            .iter()
-            .fold(HashSet::<&str>::new(), |mut set, candidate| {
-                // dbg!(candidate);
-                if let Some(thing) = can_contain.get(*candidate) {
-                    set.extend(thing);
-                }
-                set
-            });
 
-        // dbg!(&new_candidates);
-        unchecked_candidates.extend(new_candidates);
-        checked_candidates.extend(diff);
-        // dbg!(&unchecked_candidates);
+        for bag_color in unchecked_bag_colors.iter() {
+            if let Some(contains) = contains_by_color.get(bag_color) {
+                outermost_bag_colors.extend(contains);
+            }
+        }
 
-        if unchecked_candidates.difference(&checked_candidates).count() == 0 {
-            return unchecked_candidates;
+        checked_bag_colors.extend(unchecked_bag_colors);
+
+        if outermost_bag_colors.difference(&checked_bag_colors).count() == 0 {
+            return outermost_bag_colors;
         }
     }
 
@@ -88,8 +76,55 @@ fn check_input(input: &str) -> HashSet<&str> {
 }
 
 fn check_input2(input: &str) -> usize {
-    parse_input(input);
-    todo!()
+    let mut contains_by_color = parse_input(input).into_iter().fold(
+        HashMap::new(),
+        |mut map, (container_color, contains)| {
+            map.insert(container_color, contains);
+            map
+        },
+    );
+
+    let mut contains_count_by_color = HashMap::new();
+
+    let count = count_contains(
+        1,
+        "shiny gold",
+        &mut contains_by_color,
+        &mut contains_count_by_color,
+    );
+
+    // we dont count the shiny gold bag
+    count - 1
+}
+
+fn count_contains<'a>(
+    count: usize,
+    color: &'a str,
+    contains_by_color: &mut HashMap<&'a str, HashMap<&'a str, usize>>,
+    total_contained_by_color: &mut HashMap<&'a str, usize>,
+) -> usize {
+    let total_contained = match total_contained_by_color.get(color) {
+        Some(total_contained) => *total_contained,
+        None => {
+            let contains = contains_by_color.remove(color).unwrap();
+
+            let mut total_contained = 0;
+            for (contained_color, contained_count) in contains.into_iter() {
+                total_contained += count_contains(
+                    contained_count,
+                    contained_color,
+                    contains_by_color,
+                    total_contained_by_color,
+                );
+            }
+
+            total_contained_by_color.insert(color, total_contained);
+
+            total_contained
+        }
+    };
+
+    count + (count * total_contained)
 }
 
 #[cfg(test)]
@@ -106,8 +141,15 @@ mod tests {
 
     #[test]
     fn test_check_input2() {
-        let input = include_str!("../data/day6_test.txt");
+        let input = include_str!("../data/day7_test.txt");
         let answered_questions_count = check_input2(input);
-        assert_eq!(answered_questions_count, 6);
+        assert_eq!(answered_questions_count, 32);
+    }
+
+    #[test]
+    fn test_check_input2_2() {
+        let input = include_str!("../data/day7_test_2.txt");
+        let answered_questions_count = check_input2(input);
+        assert_eq!(answered_questions_count, 126);
     }
 }
