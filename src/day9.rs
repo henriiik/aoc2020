@@ -78,12 +78,9 @@ fn find_range(input: &[usize], target: usize) -> (usize, usize) {
 mod tests {
     use super::*;
     use eyre::Result;
-    use tracing::Level;
 
     #[test]
     fn test_parse_input() -> Result<()> {
-        crate::init_tracing(Level::DEBUG)?;
-
         let input = include_str!("../data/day9_test.txt");
         let parsed = parse_input(input);
         dbg!(parsed);
@@ -93,8 +90,6 @@ mod tests {
 
     #[test]
     fn test_part_1() -> Result<()> {
-        crate::init_tracing(Level::DEBUG)?;
-
         let input = include_str!("../data/day9_test.txt");
         let parsed = parse_input(input);
         let answer = find_first_invalid(&parsed, 5);
@@ -107,8 +102,6 @@ mod tests {
 
     #[test]
     fn test_part_2() -> Result<()> {
-        crate::init_tracing(Level::DEBUG)?;
-
         let input = include_str!("../data/day9_test.txt");
         let parsed = parse_input(input);
         let first_invalid = find_first_invalid(&parsed, 5);
