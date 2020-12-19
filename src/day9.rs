@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use tracing::{debug, info};
 
 pub fn run() {
     let input = include_str!("../data/day9.txt");
@@ -6,7 +7,7 @@ pub fn run() {
     let answer = check_input(&parsed, 25);
     let answer_2 = check_input2(input);
 
-    println!("day 8: {} {}", answer, answer_2);
+    info!("day 8: {} {}", answer, answer_2);
 }
 
 fn parse_input(input: &str) -> Vec<usize> {
@@ -21,7 +22,7 @@ fn parse_input(input: &str) -> Vec<usize> {
 fn check_input(input: &[usize], preamble_length: usize) -> usize {
     for i in preamble_length..input.len() {
         let current = *input.get(i).unwrap();
-        dbg!(i, current);
+        debug!(i, current);
         let mut found = false;
 
         'search: for j in i - preamble_length..i - 1 {
@@ -29,7 +30,7 @@ fn check_input(input: &[usize], preamble_length: usize) -> usize {
             for k in (i - preamble_length + 1)..i {
                 let b = *input.get(k).unwrap();
                 let candidate = a + b;
-                println!("{}+{} = {}", j, k, candidate);
+                debug!(j, k, candidate);
                 if candidate == current {
                     found = true;
                     break 'search;
@@ -37,7 +38,7 @@ fn check_input(input: &[usize], preamble_length: usize) -> usize {
             }
         }
 
-        dbg!(found);
+        debug!(found);
 
         if !found {
             return current;
@@ -53,23 +54,31 @@ fn check_input2(input: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
+    use eyre::Result;
+    use tracing::Level;
 
     #[test]
-    fn test_parse_input() {
+    fn test_parse_input() -> Result<()> {
+        crate::init_tracing(Level::DEBUG)?;
+
         let input = include_str!("../data/day9_test.txt");
         let parsed = parse_input(input);
         dbg!(parsed);
+
+        Ok(())
     }
 
     #[test]
-    fn test_check_input() {
+    fn test_check_input() -> Result<()> {
+        crate::init_tracing(Level::DEBUG)?;
+
         let input = include_str!("../data/day9_test.txt");
         let parsed = parse_input(input);
         let answer = check_input(&parsed, 5);
         dbg!(answer);
         assert_eq!(answer, 127);
+        Ok(())
     }
 
     #[test]
