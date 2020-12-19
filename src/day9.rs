@@ -4,10 +4,11 @@ use tracing::{debug, info};
 pub fn run() {
     let input = include_str!("../data/day9.txt");
     let parsed = parse_input(input);
-    let answer = check_input(&parsed, 25);
-    let answer_2 = check_input2(input);
+    let first_invalid = find_first_invalid(&parsed, 25);
+    let (min, max) = find_range(&parsed, first_invalid);
+    let sum = min + max;
 
-    info!("day 8: {} {}", answer, answer_2);
+    info!(first_invalid, sum);
 }
 
 fn parse_input(input: &str) -> Vec<usize> {
@@ -19,7 +20,7 @@ fn parse_input(input: &str) -> Vec<usize> {
         .expect("invalid input")
 }
 
-fn check_input(input: &[usize], preamble_length: usize) -> usize {
+fn find_first_invalid(input: &[usize], preamble_length: usize) -> usize {
     for i in preamble_length..input.len() {
         let current = *input.get(i).unwrap();
         debug!(i, current);
@@ -48,8 +49,29 @@ fn check_input(input: &[usize], preamble_length: usize) -> usize {
     panic!("invalid input!");
 }
 
-fn check_input2(input: &str) -> usize {
-    1
+fn find_range(input: &[usize], target: usize) -> (usize, usize) {
+    'search: for i in 0..input.len() {
+        let mut candidate = *input.get(i).unwrap();
+        let mut min = candidate;
+        let mut max = candidate;
+        for j in i + 1..input.len() {
+            let current = *input.get(j).unwrap();
+
+            candidate += current;
+            if candidate > target {
+                continue 'search;
+            }
+
+            min = min.min(current);
+            max = max.max(current);
+
+            if candidate == target {
+                return (min, max);
+            }
+        }
+    }
+
+    panic!("invalid input!");
 }
 
 #[cfg(test)]
@@ -70,21 +92,29 @@ mod tests {
     }
 
     #[test]
-    fn test_check_input() -> Result<()> {
+    fn test_part_1() -> Result<()> {
         crate::init_tracing(Level::DEBUG)?;
 
         let input = include_str!("../data/day9_test.txt");
         let parsed = parse_input(input);
-        let answer = check_input(&parsed, 5);
-        dbg!(answer);
+        let answer = find_first_invalid(&parsed, 5);
+
+        debug!(answer);
+
         assert_eq!(answer, 127);
         Ok(())
     }
 
     #[test]
-    fn test_check_input2() {
+    fn test_part_2() -> Result<()> {
+        crate::init_tracing(Level::DEBUG)?;
+
         let input = include_str!("../data/day9_test.txt");
-        let answer2 = check_input2(input);
-        assert_eq!(answer2, 1);
+        let parsed = parse_input(input);
+        let first_invalid = find_first_invalid(&parsed, 5);
+        let (min, max) = find_range(&parsed, first_invalid);
+
+        assert_eq!((min, max), (15, 47));
+        Ok(())
     }
 }
