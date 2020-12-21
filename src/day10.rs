@@ -2,7 +2,6 @@ use eyre::{bail, Result};
 use std::{collections::HashMap, str::FromStr, time::Instant};
 use tracing::{debug, info, instrument};
 
-#[instrument]
 pub fn run() -> Result<()> {
     let input = include_str!("../data/day10.txt");
     let mut parsed = parse_input(input)?;
