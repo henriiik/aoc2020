@@ -1,45 +1,16 @@
 use eyre::{bail, eyre, Result};
 use std::{convert::TryFrom, time::Instant};
-use tracing::{info, instrument};
+use tracing::info;
 
 #[cfg(test)]
 use tracing::debug;
 
 pub fn run() -> Result<()> {
     let input = include_str!("../data/day11.txt");
-    let mut waiting_area = WaitingArea::parse(input)?;
+    let waiting_area = WaitingArea::parse(input)?;
 
-    let now = Instant::now();
-    for _ in 0..1000 {
-        let next = waiting_area.step();
-
-        if next == waiting_area {
-            break;
-        } else {
-            waiting_area = next
-        }
-    }
-    let elapsed_ms = now.elapsed().as_millis();
-
-    let occupied = waiting_area.count_occupied();
-    info!(occupied, ?elapsed_ms);
-
-    let mut waiting_area_part_2 = WaitingArea::parse(input)?;
-
-    let now = Instant::now();
-    for _ in 0..1000 {
-        let next = waiting_area_part_2.step_part_2();
-
-        if next == waiting_area_part_2 {
-            break;
-        } else {
-            waiting_area_part_2 = next
-        }
-    }
-    let elapsed_ms = now.elapsed().as_millis();
-
-    let occupied_part_2 = waiting_area_part_2.count_occupied();
-    info!(occupied_part_2, ?elapsed_ms);
+    Part1::run(waiting_area.clone());
+    Part2::run(waiting_area);
 
     Ok(())
 }
@@ -105,74 +76,54 @@ impl WaitingArea {
         }
     }
 
-    fn is_occupied(&self, x: usize, y: usize) -> usize {
-        if self.get_seat_state(x, y) == SeatState::Occupied {
-            1
-        } else {
-            0
+    #[cfg(test)]
+    fn debug(&self) {
+        debug!(?self.width, ?self.height);
+        for line in &self.seat_layout {
+            debug!(?line);
         }
     }
+}
 
-    fn get_next_seat_state(&self, x: usize, y: usize) -> SeatState {
-        let current = self.get_seat_state(x, y);
-        if let SeatState::Unavailable = current {
-            return SeatState::Unavailable;
-        }
+struct Part1;
 
-        let mut occupied: usize = 0;
-        occupied += self.is_occupied(x + 1, y + 1);
-        occupied += self.is_occupied(x, y + 1);
-        occupied += self.is_occupied(x + 1, y);
-
-        if x > 0 {
-            occupied += self.is_occupied(x - 1, y);
-            occupied += self.is_occupied(x - 1, y + 1);
-        }
-
-        if y > 0 {
-            occupied += self.is_occupied(x, y - 1);
-            occupied += self.is_occupied(x + 1, y - 1);
-        }
-
-        if x > 0 && y > 0 {
-            occupied += self.is_occupied(x - 1, y - 1);
-        }
-
-        if current == SeatState::Empty && occupied == 0 {
-            SeatState::Occupied
-        } else if current == SeatState::Occupied && occupied >= 4 {
-            SeatState::Empty
-        } else {
-            current
-        }
-    }
-
-    fn step(&self) -> Self {
-        let mut seat_layout = Vec::with_capacity(self.height);
-        for y in 0..self.height {
-            let mut row = Vec::with_capacity(self.width);
-            for x in 0..self.height {
-                row.push(self.get_next_seat_state(x, y));
-            }
-            seat_layout.push(row);
-        }
-
-        Self {
-            seat_layout,
-            width: self.width,
-            height: self.height,
-            max_side: self.max_side,
-        }
+impl SeatingSystem for Part1 {
+    fn num_occupied_needed_for_empty() -> usize {
+        4
     }
 
     fn look_in_direction(
-        &self,
+        waiting_area: &WaitingArea,
         pos_x: usize,
         pos_y: usize,
         delta_x: isize,
         delta_y: isize,
     ) -> SeatState {
-        for i in 1..self.max_side {
+        let x = usize::try_from(pos_x as isize + delta_x);
+        let y = usize::try_from(pos_y as isize + delta_y);
+
+        match (x, y) {
+            (Ok(x), Ok(y)) => waiting_area.get_seat_state(x, y),
+            _ => SeatState::Unavailable, // outside map
+        }
+    }
+}
+
+struct Part2;
+
+impl SeatingSystem for Part2 {
+    fn num_occupied_needed_for_empty() -> usize {
+        5
+    }
+
+    fn look_in_direction(
+        waiting_area: &WaitingArea,
+        pos_x: usize,
+        pos_y: usize,
+        delta_x: isize,
+        delta_y: isize,
+    ) -> SeatState {
+        for i in 1..waiting_area.max_side {
             let x = usize::try_from(pos_x as isize + (i * delta_x));
             let y = usize::try_from(pos_y as isize + (i * delta_y));
 
@@ -181,7 +132,7 @@ impl WaitingArea {
                 _ => return SeatState::Unavailable, // outside map
             };
 
-            let current = self.get_seat_state(x, y);
+            let current = waiting_area.get_seat_state(x, y);
             if current != SeatState::Unavailable {
                 return current;
             }
@@ -189,79 +140,104 @@ impl WaitingArea {
 
         SeatState::Unavailable
     }
+}
+
+trait SeatingSystem {
+    fn num_occupied_needed_for_empty() -> usize;
+
+    fn look_in_direction(
+        waiting_area: &WaitingArea,
+        pos_x: usize,
+        pos_y: usize,
+        delta_x: isize,
+        delta_y: isize,
+    ) -> SeatState;
 
     fn occupied_in_direction(
-        &self,
+        waiting_area: &WaitingArea,
         pos_x: usize,
         pos_y: usize,
         delta_x: isize,
         delta_y: isize,
     ) -> usize {
-        if self.look_in_direction(pos_x, pos_y, delta_x, delta_y) == SeatState::Occupied {
+        if Self::look_in_direction(waiting_area, pos_x, pos_y, delta_x, delta_y)
+            == SeatState::Occupied
+        {
             1
         } else {
             0
         }
     }
 
-    fn get_next_seat_state_part_2(&self, x: usize, y: usize) -> SeatState {
-        let current = self.get_seat_state(x, y);
+    fn get_next_seat_state(waiting_area: &WaitingArea, x: usize, y: usize) -> SeatState {
+        let current = waiting_area.get_seat_state(x, y);
         if let SeatState::Unavailable = current {
             return SeatState::Unavailable;
         }
 
         let mut occupied: usize = 0;
-        occupied += self.occupied_in_direction(x, y, 1, 1);
-        occupied += self.occupied_in_direction(x, y, 0, 1);
-        occupied += self.occupied_in_direction(x, y, 1, 0);
+        occupied += Self::occupied_in_direction(waiting_area, x, y, 1, 1);
+        occupied += Self::occupied_in_direction(waiting_area, x, y, 0, 1);
+        occupied += Self::occupied_in_direction(waiting_area, x, y, 1, 0);
 
         if x > 0 {
-            occupied += self.occupied_in_direction(x, y, -1, 0);
-            occupied += self.occupied_in_direction(x, y, -1, 1);
+            occupied += Self::occupied_in_direction(waiting_area, x, y, -1, 0);
+            occupied += Self::occupied_in_direction(waiting_area, x, y, -1, 1);
         }
 
         if y > 0 {
-            occupied += self.occupied_in_direction(x, y, 0, -1);
-            occupied += self.occupied_in_direction(x, y, 1, -1);
+            occupied += Self::occupied_in_direction(waiting_area, x, y, 0, -1);
+            occupied += Self::occupied_in_direction(waiting_area, x, y, 1, -1);
         }
 
         if x > 0 && y > 0 {
-            occupied += self.occupied_in_direction(x, y, -1, -1);
+            occupied += Self::occupied_in_direction(waiting_area, x, y, -1, -1);
         }
 
         if current == SeatState::Empty && occupied == 0 {
             SeatState::Occupied
-        } else if current == SeatState::Occupied && occupied >= 5 {
+        } else if current == SeatState::Occupied
+            && occupied >= Self::num_occupied_needed_for_empty()
+        {
             SeatState::Empty
         } else {
             current
         }
     }
 
-    fn step_part_2(&self) -> Self {
-        let mut seat_layout = Vec::with_capacity(self.height);
-        for y in 0..self.height {
-            let mut row = Vec::with_capacity(self.width);
-            for x in 0..self.height {
-                row.push(self.get_next_seat_state_part_2(x, y));
+    fn step(waiting_area: &WaitingArea) -> WaitingArea {
+        let mut seat_layout = Vec::with_capacity(waiting_area.height);
+        for y in 0..waiting_area.height {
+            let mut row = Vec::with_capacity(waiting_area.width);
+            for x in 0..waiting_area.height {
+                row.push(Self::get_next_seat_state(waiting_area, x, y));
             }
             seat_layout.push(row);
         }
 
-        Self {
+        WaitingArea {
             seat_layout,
-            width: self.width,
-            height: self.height,
-            max_side: self.max_side,
+            width: waiting_area.width,
+            height: waiting_area.height,
+            max_side: waiting_area.max_side,
         }
     }
 
-    #[cfg(test)]
-    fn debug(&self) {
-        debug!(?self.width, ?self.height);
-        for line in &self.seat_layout {
-            debug!(?line);
+    fn run(mut waiting_area: WaitingArea) {
+        let now = Instant::now();
+        for _ in 0..1000 {
+            let next = Self::step(&waiting_area);
+
+            if next == waiting_area {
+                break;
+            } else {
+                waiting_area = next
+            }
         }
+        let elapsed_ms = now.elapsed().as_millis();
+
+        let occupied = waiting_area.count_occupied();
+        info!(occupied, ?elapsed_ms);
     }
 }
 
@@ -352,7 +328,7 @@ mod tests {
         debug!(?elapsed_ms);
 
         let now = Instant::now();
-        let got_step_2 = step_1.step();
+        let got_step_2 = Part1::step(&step_1);
         let elapsed_ms = now.elapsed().as_millis();
 
         got_step_2.debug();
@@ -379,7 +355,7 @@ mod tests {
 
         for input in inputs {
             let now = Instant::now();
-            got = got.step();
+            got = Part1::step(&got);
             let elapsed_ms = now.elapsed().as_millis();
 
             got.debug();
@@ -395,7 +371,7 @@ mod tests {
             assert_eq!(got, want);
         }
 
-        assert_eq!(got.step(), got, "should be stable after last step");
+        assert_eq!(Part1::step(&got), got, "should be stable after last step");
 
         assert_eq!(got.count_occupied(), 37);
 
@@ -413,47 +389,47 @@ mod tests {
         debug!(?elapsed_ms);
 
         assert_eq!(
-            wa.look_in_direction(3, 4, -1, -1),
+            Part2::look_in_direction(&wa, 3, 4, -1, -1),
             SeatState::Occupied,
             "(-1, -1)"
         );
         assert_eq!(
-            wa.look_in_direction(3, 4, -1, 1),
+            Part2::look_in_direction(&wa, 3, 4, -1, 1),
             SeatState::Occupied,
             "(-1, 1)"
         );
         assert_eq!(
-            wa.look_in_direction(3, 4, -1, 0),
+            Part2::look_in_direction(&wa, 3, 4, -1, 0),
             SeatState::Occupied,
             "(-1, 0)"
         );
         assert_eq!(
-            wa.look_in_direction(3, 4, 0, -1),
+            Part2::look_in_direction(&wa, 3, 4, 0, -1),
             SeatState::Occupied,
             "(0, -1)"
         );
         assert_eq!(
-            wa.look_in_direction(3, 4, 0, 1),
+            Part2::look_in_direction(&wa, 3, 4, 0, 1),
             SeatState::Occupied,
             "(0, 1)"
         );
         assert_eq!(
-            wa.look_in_direction(3, 4, 1, -1),
+            Part2::look_in_direction(&wa, 3, 4, 1, -1),
             SeatState::Occupied,
             "(1, -1)"
         );
         assert_eq!(
-            wa.look_in_direction(3, 4, 1, 0),
+            Part2::look_in_direction(&wa, 3, 4, 1, 0),
             SeatState::Occupied,
             "(1, 0)"
         );
         assert_eq!(
-            wa.look_in_direction(3, 4, 1, 1),
+            Part2::look_in_direction(&wa, 3, 4, 1, 1),
             SeatState::Occupied,
             "(1, 1)"
         );
 
-        assert_eq!(wa.get_next_seat_state_part_2(3, 4), SeatState::Empty);
+        assert_eq!(Part2::get_next_seat_state(&wa, 3, 4), SeatState::Empty);
         assert_eq!(wa.get_seat_state(3, 4), SeatState::Empty);
 
         Ok(())
@@ -469,7 +445,7 @@ mod tests {
         debug!(?elapsed_ms);
 
         let now = Instant::now();
-        let got_step_2 = step_1.step_part_2();
+        let got_step_2 = Part2::step(&step_1);
         let elapsed_ms = now.elapsed().as_millis();
 
         // got_step_2.debug();
@@ -497,7 +473,7 @@ mod tests {
 
         for input in inputs {
             let now = Instant::now();
-            got = got.step_part_2();
+            got = Part2::step(&got);
             let elapsed_ms = now.elapsed().as_millis();
 
             got.debug();
@@ -513,7 +489,7 @@ mod tests {
             assert_eq!(got, want);
         }
 
-        assert_eq!(got.step(), got, "should be stable after last step");
+        assert_eq!(Part2::step(&got), got, "should be stable after last step");
 
         assert_eq!(got.count_occupied(), 26);
 
