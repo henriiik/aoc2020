@@ -5,6 +5,7 @@ mod day1;
 mod day10;
 mod day11;
 mod day12;
+mod day13;
 mod day2;
 mod day3;
 mod day4;
@@ -44,6 +45,7 @@ fn main() -> Result<()> {
     day10::run()?;
     day11::run()?;
     day12::run()?;
+    day13::run()?;
 
     Ok(())
 }
