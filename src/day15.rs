@@ -8,8 +8,8 @@ pub fn run() -> Result<()> {
     let nums = parse(input)?;
     let answer = memory_game(nums.clone(), 2020);
     info!(answer);
-    let answer = memory_game_2(nums, 30000000);
-    info!(answer);
+    let answer_2 = memory_game_2(nums, 30000000);
+    info!(answer_2);
 
     Ok(())
 }

@@ -8,6 +8,7 @@ mod day12;
 mod day13;
 mod day14;
 mod day15;
+mod day16;
 mod day2;
 mod day3;
 mod day4;
@@ -35,21 +36,22 @@ fn init_test() {
 fn main() -> Result<()> {
     init_tracing(Level::INFO);
 
-    day1::run();
-    day2::run();
-    day3::run();
-    day4::run();
-    day5::run();
-    day6::run();
-    day7::run();
-    day8::run();
-    day9::run();
-    day10::run()?;
-    day11::run()?;
-    day12::run()?;
-    day13::run()?;
-    day14::run()?;
+    day16::run()?;
     day15::run()?;
+    day14::run()?;
+    day13::run()?;
+    day12::run()?;
+    day11::run()?;
+    day10::run()?;
+    day9::run();
+    day8::run();
+    day7::run();
+    day6::run();
+    day5::run();
+    day4::run();
+    day3::run();
+    day2::run();
+    day1::run();
 
     Ok(())
 }
