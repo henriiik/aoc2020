@@ -1,7 +1,8 @@
-use eyre::{bail, eyre, Result};
+use eyre::Result;
 use std::{collections::HashMap, str::FromStr};
-use tracing::{debug, info, instrument, trace};
+use tracing::{debug, info, instrument};
 
+#[instrument]
 pub fn run() -> Result<()> {
     let input = include_str!("../data/day15.txt");
     let nums = parse(input)?;
@@ -99,7 +100,7 @@ mod tests {
             (vec![3, 1, 2], 1836),
         ];
         for (nums, want) in tests {
-            assert_eq!(memory_game(nums, 2020), want);
+            assert_eq!(memory_game(nums.clone(), 2020), want);
             assert_eq!(memory_game_2(nums, 2020), want);
         }
 
@@ -120,15 +121,6 @@ mod tests {
         for (nums, want) in tests {
             assert_eq!(memory_game_2(nums, 30000000), want);
         }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_run_() -> Result<()> {
-        let input = include_str!("../data/day15_test.txt");
-        let nums = parse(input)?;
-        assert_eq!(memory_game(nums, 2020), 436);
 
         Ok(())
     }
