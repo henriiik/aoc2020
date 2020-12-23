@@ -83,7 +83,7 @@ impl FromStr for Rule {
         let mut range_a_values = ranges
             .next()
             .ok_or_else(|| eyre!("invalid input, no first range: {}", s))?
-            .split("-")
+            .split('-')
             .map(usize::from_str);
 
         let range_a_start = range_a_values
@@ -96,7 +96,7 @@ impl FromStr for Rule {
         let mut range_b_values = ranges
             .next()
             .ok_or_else(|| eyre!("invalid input, no first range: {}", s))?
-            .split("-")
+            .split('-')
             .map(usize::from_str);
 
         let range_b_start = range_b_values
@@ -166,13 +166,7 @@ impl TicketScanner {
         let tickets: Vec<Ticket> = self.nearby_tickets.drain(..).collect();
         self.nearby_tickets = tickets
             .into_iter()
-            .filter_map(|ticket| {
-                if let Some(_) = ticket.has_invalid_value(&self.rules) {
-                    return None;
-                } else {
-                    return Some(ticket);
-                }
-            })
+            .filter(|ticket| ticket.has_invalid_value(&self.rules).is_none())
             .collect();
     }
 
@@ -183,7 +177,7 @@ impl TicketScanner {
         let mut rule_index_to_rule_map: HashMap<_, _> = self.rules.drain(..).enumerate().collect();
         let mut value_index_to_rule_index_map = HashMap::new();
 
-        while value_indexes.len() > 0 {
+        while !value_indexes.is_empty() {
             'search: for value_index in value_indexes.clone() {
                 let valid = rule_index_to_rule_map
                     .iter()
@@ -249,7 +243,7 @@ mod tests {
 
         let scanner = TicketScanner::parse(input)?;
 
-        dbg!(scanner);
+        debug!(?scanner);
 
         Ok(())
     }
