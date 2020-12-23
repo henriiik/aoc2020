@@ -36,6 +36,16 @@ pub fn run() -> Result<()> {
 
     assert_eq!(active_hyper_cubes_i8, 2696);
 
+    let hyper_dimension_i8_array = HyperDimensionI8Array::parse(input)?;
+    debug!(?hyper_dimension_i8_array);
+
+    let now = Instant::now();
+    let active_hyper_cubes_i8_array = hyper_dimension_i8_array.boot();
+    let elapsed_micros = now.elapsed().as_micros();
+    info!(active_hyper_cubes_i8_array, ?elapsed_micros);
+
+    assert_eq!(active_hyper_cubes_i8_array, 2696);
+
     Ok(())
 }
 
@@ -344,6 +354,126 @@ impl HyperDimensionI8 {
                 for y in y - 1..=y + 1 {
                     for x in x - 1..=x + 1 {
                         let current = (x, y, z, w);
+                        if current == source {
+                            continue;
+                        } else if self.active_cubes.contains(&current) {
+                            active_neighbors += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        match (source_active, active_neighbors) {
+            (true, active_neighbors) if active_neighbors == 2 || active_neighbors == 3 => true,
+            (true, _) => false,
+            (false, 3) => true,
+            (false, _) => false,
+        }
+    }
+
+    fn step(&self) -> Self {
+        let mut next = Self::default();
+        for z in self.min_z - 1..=self.max_z + 1 {
+            for w in self.min_w - 1..=self.max_w + 1 {
+                for y in self.min_y - 1..=self.max_y + 1 {
+                    for x in self.min_x - 1..=self.max_x + 1 {
+                        if self.step_cube(x, y, z, w) {
+                            next.insert(x, y, z, w);
+                        }
+                    }
+                }
+            }
+        }
+        next
+    }
+
+    fn boot(self) -> usize {
+        let mut next = self;
+        for _ in 0..6 {
+            next = next.step()
+        }
+        next.active_cubes.len()
+    }
+}
+
+#[derive(Default, Clone, PartialEq)]
+struct HyperDimensionI8Array {
+    active_cubes: HashSet<[i8; 4]>,
+    min_x: i8,
+    max_x: i8,
+    min_y: i8,
+    max_y: i8,
+    min_z: i8,
+    max_z: i8,
+    min_w: i8,
+    max_w: i8,
+}
+
+impl Debug for HyperDimensionI8Array {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for w in self.min_w..=self.max_w {
+            for z in self.min_z..=self.max_z {
+                writeln!(f, "\nz={}, w={}", z, w)?;
+                for y in self.min_y..=self.max_y {
+                    for x in self.min_x..=self.max_x {
+                        // write!(f, "\nx:{},y:{},z:{},wat:", x, y, z)?;
+                        if self.active_cubes.contains(&[x, y, z, w]) {
+                            write!(f, "#")?
+                        } else {
+                            write!(f, ".")?
+                        }
+                    }
+                    writeln!(f)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl HyperDimensionI8Array {
+    fn parse(input: &str) -> Result<Self> {
+        let z = 0;
+        let w = 0;
+        let v = input
+            .trim()
+            .lines()
+            .enumerate()
+            .fold(Self::default(), |pd, (y, line)| {
+                line.chars().enumerate().fold(pd, move |mut pd, (x, c)| {
+                    if c == '#' {
+                        pd.insert(x as i8, y as i8, z as i8, w as i8)
+                    }
+                    pd
+                })
+            });
+
+        Ok(v)
+    }
+
+    fn insert(&mut self, x: i8, y: i8, z: i8, w: i8) {
+        self.min_x = self.min_x.min(x);
+        self.max_x = self.max_x.max(x);
+        self.min_y = self.min_y.min(y);
+        self.max_y = self.max_y.max(y);
+        self.min_z = self.min_z.min(z);
+        self.max_z = self.max_z.max(z);
+        self.min_w = self.min_w.min(w);
+        self.max_w = self.max_w.max(w);
+        self.active_cubes.insert([x, y, z, w]);
+    }
+
+    fn step_cube(&self, x: i8, y: i8, z: i8, w: i8) -> bool {
+        let source = [x, y, z, w];
+        let source_active = self.active_cubes.contains(&source);
+        let mut active_neighbors = 0;
+        for z in z - 1..=z + 1 {
+            for w in w - 1..=w + 1 {
+                for y in y - 1..=y + 1 {
+                    for x in x - 1..=x + 1 {
+                        let current = [x, y, z, w];
                         if current == source {
                             continue;
                         } else if self.active_cubes.contains(&current) {

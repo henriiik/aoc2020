@@ -17,5 +17,6 @@
         "titleBar.inactiveForeground": "#e7e7e799"
     },
     "peacock.color": "#dd0531",
-    "files.eol": "\n"
+    "files.eol": "\n",
+    "rust-analyzer.checkOnSave.command": "clippy"
 }
