@@ -3,6 +3,7 @@ use std::{
     collections::{HashMap, HashSet},
     ops::RangeInclusive,
     str::FromStr,
+    time::Instant,
 };
 use tracing::{debug, info, instrument};
 
@@ -13,8 +14,10 @@ pub fn run() -> Result<()> {
     let answer: usize = scanner.find_invalid_values().iter().sum();
     info!(?answer);
 
+    let now = Instant::now();
     let answer_2 = scanner.get_departure_value();
-    info!(?answer_2);
+    let elapsed_micros = now.elapsed().as_micros();
+    info!(?answer_2, ?elapsed_micros);
 
     Ok(())
 }
