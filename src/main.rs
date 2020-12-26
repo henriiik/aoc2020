@@ -1,5 +1,7 @@
 use eyre::Result;
-use tracing::Level;
+use tracing_error::ErrorLayer;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt, EnvFilter};
 
 mod day1;
 mod day10;
@@ -10,6 +12,7 @@ mod day14;
 mod day15;
 mod day16;
 mod day17;
+mod day18;
 mod day2;
 mod day3;
 mod day4;
@@ -19,10 +22,20 @@ mod day7;
 mod day8;
 mod day9;
 
-fn init_tracing(level: Level) {
-    let coll = tracing_subscriber::fmt().with_max_level(level).finish();
-    tracing::subscriber::set_global_default(coll)
-        .expect("should be able to register subscriber once.");
+fn init_tracing(level: &str) {
+    color_eyre::install().unwrap();
+
+    let fmt_layer = fmt::layer().with_target(false);
+
+    let filter_layer = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(level))
+        .unwrap();
+
+    tracing_subscriber::registry()
+        .with(filter_layer)
+        .with(fmt_layer)
+        .with(ErrorLayer::default())
+        .init();
 }
 
 #[cfg(test)]
@@ -31,12 +44,13 @@ use ctor::ctor;
 #[ctor]
 #[cfg(test)]
 fn init_test() {
-    init_tracing(Level::DEBUG);
+    init_tracing("debug");
 }
 
 fn main() -> Result<()> {
-    init_tracing(Level::INFO);
+    init_tracing("info");
 
+    day18::run()?;
     day17::run()?;
     day16::run()?;
     day15::run()?;
