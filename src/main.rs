@@ -15,6 +15,7 @@ mod day17;
 mod day18;
 mod day19;
 mod day2;
+mod day20;
 mod day3;
 mod day4;
 mod day5;
@@ -51,6 +52,7 @@ fn init_test() {
 fn main() -> Result<()> {
     init_tracing("info");
 
+    day20::run()?;
     day19::run()?;
     day18::run()?;
     day17::run()?;
