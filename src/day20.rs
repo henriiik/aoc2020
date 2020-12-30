@@ -1,5 +1,5 @@
 use eyre::{bail, eyre, Context, Result};
-use std::convert::TryFrom;
+use std::{borrow::Cow, collections::binary_heap::Iter, convert::TryFrom};
 use std::{cell::RefCell, collections::HashMap, fmt::Debug, str::FromStr, time::Instant};
 use tracing::{debug, info, instrument, trace};
 
@@ -13,298 +13,71 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
-enum Rule {
-    Char(char),
-    Other(Vec<usize>),
-    Either(Vec<usize>, Vec<usize>),
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Direction {
+    Up = 0,
+    Right = 1,
+    Down = 2,
+    Left = 3,
 }
 
-trait Day19Str {
-    fn parse_rule_id(&'static self) -> Result<usize>;
-    fn parse_rule_list(&'static self) -> Result<Vec<usize>>;
-    fn parse_rule(&'static self) -> Result<(usize, Rule)>;
-    fn parse_input(&'static self) -> Result<(HashMap<usize, Rule>, Vec<&'static str>)>;
-}
-
-impl Day19Str for str {
-    fn parse_rule_id(&'static self) -> Result<usize> {
-        self.parse().context(self)
-    }
-
-    fn parse_rule_list(&'static self) -> Result<Vec<usize>> {
-        self.split(' ')
-            .map(|s| s.parse().map_err(eyre::Report::new).context(s))
-            .collect()
-    }
-
-    fn parse_rule(&'static self) -> Result<(usize, Rule)> {
-        let mut iter = self.split(": ");
-        let id_str = iter
-            .next()
-            .ok_or_else(|| eyre!("unexpected end of input"))
-            .context(self)?;
-
-        let id = id_str.parse_rule_id()?;
-
-        let rule_str = iter
-            .next()
-            .ok_or_else(|| eyre!("unexpected end of input"))
-            .context(self)?;
-
-        if rule_str.starts_with('"') {
-            return Ok((id, Rule::Char(rule_str.chars().nth(1).unwrap())));
-        }
-
-        let mut iter = rule_str.split(" | ");
-
-        let rule_ids = iter
-            .next()
-            .ok_or_else(|| eyre!("unexpected end of input"))
-            .context(self)?
-            .parse_rule_list()
-            .unwrap();
-
-        if let Some(other_rule_ids) = iter.next() {
-            let other_rule_ids = other_rule_ids
-                .split(' ')
-                .map(usize::from_str)
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap();
-            Ok((id, Rule::Either(rule_ids, other_rule_ids)))
-        } else {
-            Ok((id, Rule::Other(rule_ids)))
+impl Direction {
+    fn into_index(self) -> usize {
+        match self {
+            Direction::Up => 0,
+            Direction::Right => 1,
+            Direction::Down => 2,
+            Direction::Left => 3,
         }
     }
 
-    fn parse_input(&'static self) -> Result<(HashMap<usize, Rule>, Vec<&'static str>)> {
-        let mut iter = self.split("\n\n");
-        let rules = iter
-            .next()
-            .ok_or_else(|| eyre!("unexpected end of input"))
-            .context(self)?
-            .lines()
-            .map(str::parse_rule)
-            .collect::<Result<_>>()?;
+    fn from_index(index: usize) -> Result<Self> {
+        match index {
+            0 => Ok(Direction::Up),
+            1 => Ok(Direction::Right),
+            2 => Ok(Direction::Down),
+            3 => Ok(Direction::Left),
+            _ => bail!("invalid index: {}", index),
+        }
+    }
 
-        let messages = iter
-            .next()
-            .ok_or_else(|| eyre!("unexpected end of input"))
-            .context(self)?
-            .lines()
-            .collect();
+    fn into_rotated_index(self, rotation: usize) -> usize {
+        (self.into_index() + rotation).rem_euclid(4)
+    }
 
-        Ok((rules, messages))
+    fn is_y(self) -> bool {
+        self == Direction::Up || self == Direction::Down
     }
 }
 
-struct RuleMatcher {
-    rules: HashMap<usize, Rule>,
-    max_recurse: RefCell<HashMap<usize, usize>>,
-    current_recurse: RefCell<HashMap<usize, usize>>,
-    recurse_limit: usize,
-}
-
-#[derive(Debug, Clone)]
-pub enum Match {
-    Finished,
-    Next(usize),
-}
-
-impl RuleMatcher {
-    fn new(rules: HashMap<usize, Rule>) -> Self {
-        Self {
-            rules,
-            max_recurse: Default::default(),
-            current_recurse: Default::default(),
-            recurse_limit: 1,
-        }
-    }
-
-    fn clear(&self) {
-        self.max_recurse.borrow_mut().clear();
-        self.current_recurse.borrow_mut().clear();
-    }
-
-    #[instrument(level = "trace", name = "m", skip(self, msg))]
-    fn matches_rule(&self, msg: &'static str, i: usize, id: usize) -> Result<Option<Match>> {
-        let max = self.max_recurse.borrow().get(&id).cloned();
-        if let Some(max) = max {
-            let current = self
-                .current_recurse
-                .borrow()
-                .get(&id)
-                .cloned()
-                .unwrap_or_default();
-
-            if current > max {
-                trace!("recursion limit reached");
-                return Ok(Some(Match::Next(i)));
-            }
-
-            self.current_recurse.borrow_mut().insert(id, current + 1);
-        }
-
-        let rule = self
-            .rules
-            .get(&id)
-            .ok_or_else(|| eyre!("invalid rule id: {}", id))?;
-
-        let result = match rule {
-            Rule::Char(want) => {
-                let got = msg.chars().nth(i);
-                trace!(?want, ?got);
-
-                match got {
-                    Some(got) if *want == got => {
-                        if msg.len() == i + 1 {
-                            Some(Match::Finished)
-                        } else {
-                            Some(Match::Next(i + 1))
-                        }
-                    }
-                    _ => None,
-                }
-            }
-            Rule::Other(rule_list) => self.matches_rule_list(msg, i, rule_list)?,
-            Rule::Either(rule_list_a, rule_list_b) => {
-                let shared = rule_list_a
-                    .iter()
-                    .zip(rule_list_b.iter())
-                    .take_while(|(a, b)| a == b)
-                    .count();
-
-                let shared_list = &rule_list_a[0..shared];
-                let a_list = &rule_list_a[shared..];
-                let b_list = &rule_list_b[shared..];
-
-                match self.matches_rule_list(msg, i, shared_list)? {
-                    Some(Match::Next(i)) => {
-                        if let Some(n) = self.matches_rule_list(msg, i, a_list)? {
-                            Some(n)
-                        } else if let Some(n) = self.matches_rule_list(msg, i, b_list)? {
-                            Some(n)
-                        } else {
-                            None
-                        }
-                    }
-                    _ => None,
-                }
-            }
-        };
-
-        if result.is_none() {
-            trace!("fail");
-        } else {
-            trace!("match: {:?}", result);
-        }
-
-        Ok(result)
-    }
-
-    #[instrument(level = "trace", name = "l", skip(self, msg, ids))]
-    fn matches_rule_list(
-        &self,
-        msg: &'static str,
-        mut i: usize,
-        ids: &[usize],
-    ) -> Result<Option<Match>> {
-        let mut iter = ids.iter().peekable();
-        while let Some(id) = iter.next() {
-            let res = self.matches_rule(msg, i, *id)?;
-
-            match res {
-                Some(Match::Next(next)) => {
-                    i = next;
-                }
-                Some(Match::Finished) => {
-                    if iter.peek().is_none() {
-                        trace!("complete match detected!");
-                        return Ok(Some(Match::Finished));
-                    } else {
-                        trace!("non-complete match detected! {:?}", iter.peek());
-                        return Ok(None);
-                    }
-                }
-                None => return Ok(None),
-            }
-        }
-
-        trace!(?ids);
-
-        if i == msg.len() {
-            Ok(Some(Match::Finished))
-        } else {
-            Ok(Some(Match::Next(i)))
-        }
-    }
-
-    #[instrument(level = "trace", name = "t" skip(self), fields(len = msg.len()))]
-    fn test_msg(&self, msg: &'static str) -> Result<bool> {
-        self.clear();
-
-        for i in 0..self.recurse_limit {
-            for j in 0..self.recurse_limit {
-                trace!(i, j);
-                self.max_recurse.borrow_mut().insert(8, i);
-                self.max_recurse.borrow_mut().insert(11, j);
-                self.current_recurse.borrow_mut().insert(8, 0);
-                self.current_recurse.borrow_mut().insert(11, 0);
-                match self.matches_rule(msg, 0, 0)? {
-                    Some(Match::Finished) => return Ok(true),
-                    Some(Match::Next(next)) => {
-                        trace!(len = ?msg.len(), next);
-                        if msg.len() == next {
-                            return Ok(true);
-                        }
-                    }
-                    None => (),
-                }
-            }
-        }
-
-        Ok(false)
-    }
-
-    fn test_msgs(&self, msgs: &[&'static str]) -> Result<usize> {
-        let mut valid = 0;
-        let now = Instant::now();
-
-        for &msg in msgs {
-            if self.test_msg(msg)? {
-                valid += 1;
-            }
-        }
-
-        let elapsed_ms = now.elapsed().as_millis();
-        info!(?elapsed_ms);
-
-        Ok(valid)
-    }
-
-    fn enable_part_2(&mut self) {
-        // these rules are changed from the instructions to match how the matcher works
-        self.rules.insert(8, Rule::Other(vec![42, 8]));
-        self.rules.insert(11, Rule::Other(vec![42, 11, 31]));
-        self.recurse_limit = 5;
-    }
-
-    fn from_str(input: &'static str) -> Result<(Self, Vec<&'static str>)> {
-        let (rules, msgs) = input.parse_input()?;
-
-        trace!(?rules);
-        trace!(?msgs);
-
-        Ok((RuleMatcher::new(rules), msgs))
-    }
-}
-
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 struct Tile {
     data: [bool; 100],
     id: u64,
     edge_ids: [u16; 4],         // up, right, down, left
     flipped_edge_ids: [u16; 4], // up, right, down, left
+}
+
+impl Tile {
+    fn opposite_edge_id(&self, id: u16) -> Option<u16> {
+        if let Some(idx) = self.edge_ids.iter().position(|&i| i == id) {
+            self.edge_ids.get((idx + 2).rem_euclid(4)).cloned()
+        } else if let Some(idx) = self.flipped_edge_ids.iter().position(|&i| i == id) {
+            self.flipped_edge_ids.get((idx + 2).rem_euclid(4)).cloned()
+        } else {
+            None
+        }
+    }
+
+    fn next_edge_id(&self, id: u16) -> Option<u16> {
+        if let Some(idx) = self.edge_ids.iter().position(|&i| i == id) {
+            self.edge_ids.get((idx + 2).rem_euclid(4)).cloned()
+        } else if let Some(idx) = self.flipped_edge_ids.iter().position(|&i| i == id) {
+            self.flipped_edge_ids.get((idx + 2).rem_euclid(4)).cloned()
+        } else {
+            None
+        }
+    }
 }
 
 impl Debug for Tile {
@@ -325,6 +98,85 @@ impl Debug for Tile {
         writeln!(f)?;
 
         Ok(())
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct RotatedTile<'a> {
+    tile: &'a Tile,
+    flipped: bool, // we assume that we first rotate to the correct possition and then flip
+    rotation: usize,
+}
+
+impl<'a> RotatedTile<'a> {
+    fn new_with_id_in_direction(tile: &'a Tile, id: u16, direction: Direction) -> Self {
+        let (flipped, index) = if let Some(index) = tile.edge_ids.iter().position(|&x| x == id) {
+            (false, index)
+        } else if let Some(index) = tile.flipped_edge_ids.iter().position(|&x| x == id) {
+            (true, index)
+        } else {
+            todo!()
+        };
+
+        let direction_index = direction.into_index();
+        let is_even_direction = direction_index & 1 == 0;
+
+        // debug!(flipped, index, direction_index, rotation);
+
+        let flipped = flipped != (direction_index > 1);
+
+        let mut rotation = (4 + index - direction_index).rem_euclid(4);
+        // if we are flipped, the order of the sides is changed
+        if flipped && !is_even_direction {
+            rotation = (rotation + 2).rem_euclid(4);
+        }
+
+        RotatedTile {
+            tile,
+            flipped,
+            rotation,
+        }
+    }
+
+    fn get_id_in_direction(&self, direction: Direction) -> u16 {
+        let direction_index = direction.into_index();
+        let is_even_direction = direction_index & 1 == 0;
+
+        let mut index = (direction_index + self.rotation).rem_euclid(4);
+
+        debug!(
+            ?direction_index,
+            self.rotation, index, is_even_direction, self.flipped
+        );
+
+        // if we are flipped, the order of the sides is changed
+        if self.flipped && !is_even_direction {
+            index = (index + 2).rem_euclid(4);
+        }
+
+        // the down and left directions are normally flipped
+        if self.flipped != (direction_index > 1) {
+            self.tile.flipped_edge_ids[index]
+        } else {
+            self.tile.edge_ids[index]
+        }
+    }
+
+    fn up(&self) -> u16 {
+        self.get_id_in_direction(Direction::Up)
+    }
+    fn right(&self) -> u16 {
+        self.get_id_in_direction(Direction::Right)
+    }
+    fn down(&self) -> u16 {
+        self.get_id_in_direction(Direction::Down)
+    }
+    fn left(&self) -> u16 {
+        self.get_id_in_direction(Direction::Left)
+    }
+
+    fn flip_up_down(&mut self) {
+        todo!("remove")
     }
 }
 
@@ -374,17 +226,19 @@ impl Tile {
         assert_eq!(data.len(), 100);
 
         let edge_ids = [
-            calc_edge_id(&data, 0, 1)?,  //  up
-            calc_edge_id(&data, 9, 10)?, //  right
-            calc_edge_id(&data, 90, 1)?, //  down
-            calc_edge_id(&data, 0, 10)?, //  left
+            // clock wise
+            calc_edge_id(&data, 0, 1)?,    //  up
+            calc_edge_id(&data, 9, 10)?,   //  right
+            calc_edge_id(&data, 99, -1)?,  //  down
+            calc_edge_id(&data, 90, -10)?, //  left
         ];
 
         let flipped_edge_ids = [
+            // counter clock wise
             calc_edge_id(&data, 9, -1)?,   //  up
             calc_edge_id(&data, 99, -10)?, //  right
-            calc_edge_id(&data, 99, -1)?,  //  down
-            calc_edge_id(&data, 90, -10)?, //  left
+            calc_edge_id(&data, 90, 1)?,   //  down
+            calc_edge_id(&data, 0, 10)?,   //  left
         ];
 
         Ok(Self {
@@ -402,6 +256,15 @@ struct TileSet {
 }
 
 impl TileSet {
+    fn get_grid_size(&self) -> usize {
+        for n in 1..=12 {
+            if n * n == self.tiles.len() {
+                return n;
+            }
+        }
+        panic!("bad grid?!");
+    }
+
     fn parse(input: &str) -> Result<Self> {
         let tiles = input
             .split("\n\n")
@@ -410,7 +273,8 @@ impl TileSet {
         Ok(Self { tiles })
     }
 
-    fn find_match(&self, source_id: u64, edge_id: u16) -> impl Iterator<Item = &Tile> {
+    fn find_match(&self, tile: &Tile, edge_id: u16) -> impl Iterator<Item = &Tile> {
+        let source_id = tile.id;
         self.tiles.iter().filter(move |&t| {
             t.id != source_id
                 && (t.edge_ids.contains(&edge_id) || t.flipped_edge_ids.contains(&edge_id))
@@ -420,32 +284,152 @@ impl TileSet {
     fn is_corner(&self, tile: &Tile) -> bool {
         let mut n = 0;
 
-        if self.find_match(tile.id, tile.edge_ids[0]).next().is_some() {
+        if self.find_match(tile, tile.edge_ids[0]).next().is_some() {
             n += 1;
         }
 
-        if self.find_match(tile.id, tile.edge_ids[1]).next().is_some() {
+        if self.find_match(tile, tile.edge_ids[1]).next().is_some() {
             n += 1;
         }
 
-        if self.find_match(tile.id, tile.edge_ids[2]).next().is_some() {
+        if self.find_match(tile, tile.edge_ids[2]).next().is_some() {
             n += 1;
         }
 
-        if self.find_match(tile.id, tile.edge_ids[3]).next().is_some() {
+        if self.find_match(tile, tile.edge_ids[3]).next().is_some() {
             n += 1;
         }
 
         n == 2
     }
 
-    // nw, ne,se,sw
     fn find_corner_product(&self) -> u64 {
         self.tiles
             .iter()
             .filter_map(|t| if self.is_corner(t) { Some(t.id) } else { None })
             .take(4)
             .product()
+    }
+
+    fn find_tiles_with_edge_id(&self, skip_id: u64, edge_id: u16) -> impl Iterator<Item = &Tile> {
+        self.tiles.iter().filter(move |&t| {
+            t.id != skip_id
+                && (t.edge_ids.contains(&edge_id) || t.flipped_edge_ids.contains(&edge_id))
+        })
+    }
+
+    fn find_part_2(&self) -> Result<u64> {
+        let start = self
+            .tiles
+            .iter()
+            .filter(|t| self.is_corner(t))
+            .next()
+            .ok_or_else(|| eyre!("no corners?!"))?;
+
+        debug!(?start);
+
+        let north_matches = self.find_match(start, start.edge_ids[0]).count();
+        assert!(north_matches < 2);
+
+        let east_matches = self.find_match(start, start.edge_ids[1]).count();
+        assert!(east_matches < 2);
+
+        let south_matches = self.find_match(start, start.edge_ids[2]).count();
+        assert!(south_matches < 2);
+
+        let west_matches = self.find_match(start, start.edge_ids[3]).count();
+        assert!(west_matches < 2);
+
+        debug!(north_matches, east_matches, south_matches, west_matches);
+
+        let start_id = match [north_matches, east_matches, south_matches, west_matches] {
+            [1, 1, 0, 0] => start.edge_ids[0],
+            [0, 1, 1, 0] => start.edge_ids[1],
+            [0, 0, 1, 1] => start.edge_ids[2],
+            [1, 0, 0, 1] => start.edge_ids[3],
+            m => bail!("bad corner?! {:?}", m),
+        };
+
+        let rotated_start =
+            RotatedTile::new_with_id_in_direction(start, start_id, Direction::Right);
+
+        let mut rotated_tiles = vec![];
+
+        let mut row_start_edge_id = rotated_start.get_id_in_direction(Direction::Up);
+        let mut row_start_skip_id = 0;
+
+        let n = self.get_grid_size();
+        for row in 0..n {
+            assert_eq!(
+                self.find_tiles_with_edge_id(row_start_skip_id, row_start_edge_id)
+                    .count(),
+                1
+            );
+            let tile = self
+                .find_tiles_with_edge_id(row_start_skip_id, row_start_edge_id)
+                .next()
+                .ok_or_else(|| eyre!("bad start ids?!"))?;
+
+            debug!(row, col = 0, id = tile.id);
+
+            let mut current =
+                RotatedTile::new_with_id_in_direction(tile, row_start_edge_id, Direction::Up);
+
+            // lol?
+
+            row_start_skip_id = current.tile.id;
+            row_start_edge_id = current.get_id_in_direction(Direction::Down);
+
+            // if self
+            //     .find_tiles_with_edge_id(
+            //         current.tile.id,
+            //         current.get_id_in_direction(Direction::Right),
+            //     )
+            //     .count()
+            //     == 0
+            // {
+            //     // flip x if not found
+            //     current.flip_x_axis = true;
+            // }
+
+            rotated_tiles.push(current);
+
+            for col in 1..n {
+                let skip_id = current.tile.id;
+                let edge_id = current.get_id_in_direction(Direction::Right);
+
+                assert_eq!(
+                    self.find_tiles_with_edge_id(skip_id, edge_id).count(),
+                    1,
+                    "row:{}, col:{}, current: {:?}",
+                    row,
+                    col,
+                    current,
+                );
+                let tile = self
+                    .find_tiles_with_edge_id(skip_id, edge_id)
+                    .next()
+                    .ok_or_else(|| eyre!("bad ids?!"))?;
+
+                debug!(row, col, id = tile.id);
+
+                current = RotatedTile::new_with_id_in_direction(tile, edge_id, Direction::Left);
+
+                if row > 0 {
+                    let above = rotated_tiles.get_mut(((row - 1) * n) + col).unwrap();
+                    let above_down = above.down();
+                    let current_up = current.up();
+                    assert_eq!(above_down, current_up);
+                }
+
+                rotated_tiles.push(current);
+            }
+        }
+
+        debug!(?rotated_tiles);
+        todo!();
+
+        Ok(0)
     }
 }
 
@@ -479,71 +463,206 @@ mod tests {
     }
 
     #[test]
-    fn test_msgs() -> Result<()> {
-        let (matcher, msgs) = RuleMatcher::from_str(include_str!("../data/day19_test.txt"))?;
+    fn test_find_part_2() -> Result<()> {
+        let input = include_str!("../data/day20_test.txt");
 
-        let result = matcher.test_msgs(&msgs)?;
+        let tiles = TileSet::parse(input)?;
 
-        assert_eq!(result, 2);
+        let part_2 = tiles.find_part_2()?;
 
-        Ok(())
-    }
-
-    #[test]
-    fn test_msgs_2() -> Result<()> {
-        let (mut matcher, _msgs) = RuleMatcher::from_str(include_str!("../data/day19_test_2.txt"))?;
-
-        matcher.enable_part_2();
-
-        assert_eq!(
-            matcher.test_msg("abbbbbabbbaaaababbaabbbbabababbbabbbbbbabaaaa")?,
-            false
-        );
-        assert_eq!(matcher.test_msg("bbabbbbaabaabba")?, true);
-        assert_eq!(matcher.test_msg("babbbbaabbbbbabbbbbbaabaaabaaa")?, true);
-        assert_eq!(
-            matcher.test_msg("aaabbbbbbaaaabaababaabababbabaaabbababababaaa")?,
-            true
-        );
-        assert_eq!(matcher.test_msg("bbbbbbbaaaabbbbaaabbabaaa")?, true);
-        assert_eq!(
-            matcher.test_msg("bbbababbbbaaaaaaaabbababaaababaabab")?,
-            true
-        );
-        assert_eq!(matcher.test_msg("ababaaaaaabaaab")?, true);
-        assert_eq!(matcher.test_msg("ababaaaaabbbaba")?, true);
-        assert_eq!(matcher.test_msg("baabbaaaabbaaaababbaababb")?, true);
-        assert_eq!(matcher.test_msg("abbbbabbbbaaaababbbbbbaaaababb")?, true);
-        assert_eq!(matcher.test_msg("aaaaabbaabaaaaababaa")?, true);
-        assert_eq!(matcher.test_msg("aaaabbaaaabbaaa")?, false);
-        assert_eq!(
-            matcher.test_msg("aaaabbaabbaaaaaaabbbabbbaaabbaabaaa")?,
-            true
-        );
-        assert_eq!(matcher.test_msg("babaaabbbaaabaababbaabababaaab")?, false);
-        assert_eq!(
-            matcher.test_msg("aabbbbbaabbbaaaaaabbbbbababaaaaabbaaabba")?,
-            true
-        );
+        assert_eq!(part_2, 20899048083289);
 
         Ok(())
     }
 
     #[test]
-    fn test_msgs_custom() -> Result<()> {
-        let (mut matcher, _msgs) =
-            RuleMatcher::from_str(include_str!("../data/day19_test_custom.txt"))?;
+    fn test_opposite_edge() {
+        let tile = Tile {
+            data: [false; 100],
+            id: 1,
+            edge_ids: [1, 2, 3, 4],
+            flipped_edge_ids: [5, 6, 7, 8],
+        };
 
-        matcher.enable_part_2();
+        assert_eq!(tile.opposite_edge_id(1), Some(3));
+        assert_eq!(tile.opposite_edge_id(2), Some(4));
+        assert_eq!(tile.opposite_edge_id(3), Some(1));
+        assert_eq!(tile.opposite_edge_id(4), Some(2));
 
-        assert_eq!(matcher.test_msg("a")?, false);
-        assert_eq!(matcher.test_msg("ab")?, false);
-        assert_eq!(matcher.test_msg("b")?, false);
+        assert_eq!(tile.opposite_edge_id(5), Some(7));
+        assert_eq!(tile.opposite_edge_id(6), Some(8));
+        assert_eq!(tile.opposite_edge_id(7), Some(5));
+        assert_eq!(tile.opposite_edge_id(8), Some(6));
+    }
 
-        assert_eq!(matcher.test_msg("aaaabb")?, true, "2 x 8, 2 x 42");
-        assert_eq!(matcher.test_msg("aaabb")?, true, "1 x 8, 2 x 42");
-        assert_eq!(matcher.test_msg("aaab")?, true, "2 x 8, 1 x 42");
-        assert_eq!(matcher.test_msg("aab")?, true, "1 x 8, 1 x 42");
+    #[test]
+    fn test_new_with_id_in_direction() {
+        let tile = &Tile {
+            data: [false; 100],
+            id: 1,
+            edge_ids: [1, 2, 3, 4],
+            flipped_edge_ids: [5, 6, 7, 8],
+        };
+
+        let directions = [
+            Direction::Up,
+            Direction::Right,
+            Direction::Down,
+            Direction::Left,
+        ];
+
+        for id in 1..=8 {
+            for &d in directions.iter() {
+                let got_tile = RotatedTile::new_with_id_in_direction(tile, id, d);
+                let got_id = got_tile.get_id_in_direction(d);
+                // debug!(?got_tile);
+                assert_eq!(
+                    id, got_id,
+                    "should work for id: {}, direction: {:?}, tile: {:?}",
+                    id, d, got_tile
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_id_in_direction() {
+        let tile = &Tile {
+            data: [false; 100],
+            id: 1,
+            edge_ids: [1, 2, 3, 4],
+            flipped_edge_ids: [5, 6, 7, 8],
+        };
+
+        let tests = vec![
+            (false, 0, 1, 2, 3, 4),
+            (false, 1, 2, 3, 4, 1),
+            (true, 0, 3, 6, 1, 8),
+            (true, 0, 5, 4, 7, 2),
+            (true, 0, 7, 8, 5, 6),
+            (true, 1, 8, 5, 6, 7),
+        ];
+
+        for (flipped, rotation, up, right, down, left) in tests {
+            let want = RotatedTile {
+                tile,
+                flipped,
+                rotation,
+            };
+
+            assert_eq!(want.get_id_in_direction(Direction::Up), up);
+            assert_eq!(want.get_id_in_direction(Direction::Right), right);
+            assert_eq!(want.get_id_in_direction(Direction::Down), down);
+            assert_eq!(want.get_id_in_direction(Direction::Left), left);
+        }
+    }
+
+    #[test]
+    fn test_flip_up_down() {
+        let tile = &Tile {
+            data: [false; 100],
+            id: 1,
+            edge_ids: [1, 2, 3, 4],
+            flipped_edge_ids: [5, 6, 7, 8],
+        };
+
+        let mut want = RotatedTile::new_with_id_in_direction(tile, 1, Direction::Up);
+        assert_eq!(want.get_id_in_direction(Direction::Up), 1);
+        assert_eq!(want.get_id_in_direction(Direction::Right), 2);
+        assert_eq!(want.get_id_in_direction(Direction::Down), 3);
+        assert_eq!(want.get_id_in_direction(Direction::Left), 4);
+
+        want.flip_up_down();
+
+        assert_eq!(want.get_id_in_direction(Direction::Up), 7);
+        assert_eq!(want.get_id_in_direction(Direction::Right), 2);
+        assert_eq!(want.get_id_in_direction(Direction::Down), 5);
+        assert_eq!(want.get_id_in_direction(Direction::Left), 4);
+    }
+
+    #[test]
+    fn test_simple() -> Result<()> {
+        let input = include_str!("../data/day20_test_simple.txt");
+
+        let tile = Tile::parse(input)?;
+
+        debug!(?tile);
+        debug!(?tile.edge_ids);
+        debug!(?tile.flipped_edge_ids);
+
+        // start
+        // up: 2 (256)
+        // right: 4 (128)
+        // down: (8) 64
+        // left: (16) 32
+        // ........#.
+        // ..........
+        // ..........
+        // ..........
+        // #.........
+        // ..........
+        // ..........
+        // .........#
+        // ..........
+        // ...#......
+
+        // flip
+        // up: flipped, 2 -> 256
+        // right: rotated 4 -> 32
+        // down: flipped, 64 -> 8
+        // left: rotated+flipped -> 32 -> 4
+        // .#........
+        // ..........
+        // ..........
+        // ..........
+        // .........#
+        // ..........
+        // ..........
+        // #.........
+        // ..........
+        // ......#...
+
+        // order:  0 -> 1 -> 2 -> 3
+        // flip y: 0 -> 3 -> 2 -> 1
+        // flip x: 2 -> 1 -> 3 -> 0
+
+        let tests = vec![
+            (false, 0, [2, 4, 64, 32]),
+            (false, 1, [4, 8, 32, 256]),
+            (false, 2, [8, 16, 256, 128]),
+            (false, 3, [16, 2, 128, 64]),
+            (true, 0, [256, 32, 8, 4]),
+            (true, 1, [128, 256, 16, 8]),
+            (true, 2, [64, 128, 2, 16]),
+            (true, 3, [32, 64, 4, 2]),
+        ];
+        for (want_flipped, want_rotation, want_ids) in tests {
+            let got = RotatedTile::new_with_id_in_direction(&tile, want_ids[0], Direction::Up);
+            info!(want_flipped, want_rotation, ?want_ids, ?got);
+
+            assert_eq!(got.flipped, want_flipped);
+            assert_eq!(got.rotation, want_rotation);
+
+            assert_eq!(
+                got,
+                RotatedTile::new_with_id_in_direction(&tile, want_ids[1], Direction::Right)
+            );
+
+            assert_eq!(
+                got,
+                RotatedTile::new_with_id_in_direction(&tile, want_ids[2], Direction::Down)
+            );
+
+            assert_eq!(
+                got,
+                RotatedTile::new_with_id_in_direction(&tile, want_ids[3], Direction::Left)
+            );
+
+            assert_eq!(got.up(), want_ids[0], "up");
+            assert_eq!(got.right(), want_ids[1], "right");
+            assert_eq!(got.down(), want_ids[2], "down");
+            assert_eq!(got.left(), want_ids[3], "left");
+        }
 
         Ok(())
     }
