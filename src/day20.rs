@@ -1,7 +1,7 @@
-use eyre::{bail, eyre, Context, Result};
-use std::{borrow::Cow, collections::binary_heap::Iter, convert::TryFrom};
-use std::{cell::RefCell, collections::HashMap, fmt::Debug, str::FromStr, time::Instant};
-use tracing::{debug, info, instrument, trace};
+use eyre::{bail, eyre, Result};
+use std::convert::TryFrom;
+use std::fmt::Debug;
+use tracing::{debug, info, instrument};
 
 #[instrument]
 pub fn run() -> Result<()> {
@@ -9,6 +9,9 @@ pub fn run() -> Result<()> {
     info!(t = ?tileset.tiles.len());
     let corner_product = tileset.find_corner_product();
     info!(corner_product);
+
+    let part_2 = tileset.find_part_2()?;
+    info!(part_2);
 
     Ok(())
 }
@@ -30,24 +33,6 @@ impl Direction {
             Direction::Left => 3,
         }
     }
-
-    fn from_index(index: usize) -> Result<Self> {
-        match index {
-            0 => Ok(Direction::Up),
-            1 => Ok(Direction::Right),
-            2 => Ok(Direction::Down),
-            3 => Ok(Direction::Left),
-            _ => bail!("invalid index: {}", index),
-        }
-    }
-
-    fn into_rotated_index(self, rotation: usize) -> usize {
-        (self.into_index() + rotation).rem_euclid(4)
-    }
-
-    fn is_y(self) -> bool {
-        self == Direction::Up || self == Direction::Down
-    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -57,29 +42,6 @@ struct Tile {
     edge_ids: [u16; 4],         // up, right, down, left
     flipped_edge_ids: [u16; 4], // up, right, down, left
 }
-
-impl Tile {
-    fn opposite_edge_id(&self, id: u16) -> Option<u16> {
-        if let Some(idx) = self.edge_ids.iter().position(|&i| i == id) {
-            self.edge_ids.get((idx + 2).rem_euclid(4)).cloned()
-        } else if let Some(idx) = self.flipped_edge_ids.iter().position(|&i| i == id) {
-            self.flipped_edge_ids.get((idx + 2).rem_euclid(4)).cloned()
-        } else {
-            None
-        }
-    }
-
-    fn next_edge_id(&self, id: u16) -> Option<u16> {
-        if let Some(idx) = self.edge_ids.iter().position(|&i| i == id) {
-            self.edge_ids.get((idx + 2).rem_euclid(4)).cloned()
-        } else if let Some(idx) = self.flipped_edge_ids.iter().position(|&i| i == id) {
-            self.flipped_edge_ids.get((idx + 2).rem_euclid(4)).cloned()
-        } else {
-            None
-        }
-    }
-}
-
 impl Debug for Tile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "\nid={}", self.id)?;
@@ -165,18 +127,20 @@ impl<'a> RotatedTile<'a> {
     fn up(&self) -> u16 {
         self.get_id_in_direction(Direction::Up)
     }
+
+    #[cfg(test)]
     fn right(&self) -> u16 {
         self.get_id_in_direction(Direction::Right)
     }
+
     fn down(&self) -> u16 {
         self.get_id_in_direction(Direction::Down)
     }
+
+    #[cfg(test)]
+
     fn left(&self) -> u16 {
         self.get_id_in_direction(Direction::Left)
-    }
-
-    fn flip_up_down(&mut self) {
-        todo!("remove")
     }
 }
 
@@ -322,8 +286,7 @@ impl TileSet {
         let start = self
             .tiles
             .iter()
-            .filter(|t| self.is_corner(t))
-            .next()
+            .find(|t| self.is_corner(t))
             .ok_or_else(|| eyre!("no corners?!"))?;
 
         debug!(?start);
@@ -342,20 +305,16 @@ impl TileSet {
 
         debug!(north_matches, east_matches, south_matches, west_matches);
 
-        let start_id = match [north_matches, east_matches, south_matches, west_matches] {
-            [1, 1, 0, 0] => start.edge_ids[0],
-            [0, 1, 1, 0] => start.edge_ids[1],
-            [0, 0, 1, 1] => start.edge_ids[2],
-            [1, 0, 0, 1] => start.edge_ids[3],
+        let mut row_start_edge_id = match [north_matches, east_matches, south_matches, west_matches]
+        {
+            [1, 1, 0, 0] => start.edge_ids[3],
+            [0, 1, 1, 0] => start.edge_ids[0],
+            [0, 0, 1, 1] => start.edge_ids[1],
+            [1, 0, 0, 1] => start.edge_ids[2],
             m => bail!("bad corner?! {:?}", m),
         };
 
-        let rotated_start =
-            RotatedTile::new_with_id_in_direction(start, start_id, Direction::Right);
-
         let mut rotated_tiles = vec![];
-
-        let mut row_start_edge_id = rotated_start.get_id_in_direction(Direction::Up);
         let mut row_start_skip_id = 0;
 
         let n = self.get_grid_size();
@@ -375,22 +334,8 @@ impl TileSet {
             let mut current =
                 RotatedTile::new_with_id_in_direction(tile, row_start_edge_id, Direction::Up);
 
-            // lol?
-
             row_start_skip_id = current.tile.id;
             row_start_edge_id = current.get_id_in_direction(Direction::Down);
-
-            // if self
-            //     .find_tiles_with_edge_id(
-            //         current.tile.id,
-            //         current.get_id_in_direction(Direction::Right),
-            //     )
-            //     .count()
-            //     == 0
-            // {
-            //     // flip x if not found
-            //     current.flip_x_axis = true;
-            // }
 
             rotated_tiles.push(current);
 
@@ -428,8 +373,6 @@ impl TileSet {
 
         debug!(?rotated_tiles);
         todo!();
-
-        Ok(0)
     }
 }
 
@@ -473,26 +416,6 @@ mod tests {
         assert_eq!(part_2, 20899048083289);
 
         Ok(())
-    }
-
-    #[test]
-    fn test_opposite_edge() {
-        let tile = Tile {
-            data: [false; 100],
-            id: 1,
-            edge_ids: [1, 2, 3, 4],
-            flipped_edge_ids: [5, 6, 7, 8],
-        };
-
-        assert_eq!(tile.opposite_edge_id(1), Some(3));
-        assert_eq!(tile.opposite_edge_id(2), Some(4));
-        assert_eq!(tile.opposite_edge_id(3), Some(1));
-        assert_eq!(tile.opposite_edge_id(4), Some(2));
-
-        assert_eq!(tile.opposite_edge_id(5), Some(7));
-        assert_eq!(tile.opposite_edge_id(6), Some(8));
-        assert_eq!(tile.opposite_edge_id(7), Some(5));
-        assert_eq!(tile.opposite_edge_id(8), Some(6));
     }
 
     #[test]
@@ -555,29 +478,6 @@ mod tests {
             assert_eq!(want.get_id_in_direction(Direction::Down), down);
             assert_eq!(want.get_id_in_direction(Direction::Left), left);
         }
-    }
-
-    #[test]
-    fn test_flip_up_down() {
-        let tile = &Tile {
-            data: [false; 100],
-            id: 1,
-            edge_ids: [1, 2, 3, 4],
-            flipped_edge_ids: [5, 6, 7, 8],
-        };
-
-        let mut want = RotatedTile::new_with_id_in_direction(tile, 1, Direction::Up);
-        assert_eq!(want.get_id_in_direction(Direction::Up), 1);
-        assert_eq!(want.get_id_in_direction(Direction::Right), 2);
-        assert_eq!(want.get_id_in_direction(Direction::Down), 3);
-        assert_eq!(want.get_id_in_direction(Direction::Left), 4);
-
-        want.flip_up_down();
-
-        assert_eq!(want.get_id_in_direction(Direction::Up), 7);
-        assert_eq!(want.get_id_in_direction(Direction::Right), 2);
-        assert_eq!(want.get_id_in_direction(Direction::Down), 5);
-        assert_eq!(want.get_id_in_direction(Direction::Left), 4);
     }
 
     #[test]
