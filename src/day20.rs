@@ -70,6 +70,29 @@ struct RotatedTile<'a> {
     rotation: usize,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Indexer {
+    start: i8,
+    row_step: i8,
+    col_step: i8,
+}
+
+impl Indexer {
+    fn new(start: i8, row_step: i8, col_step: i8) -> Self {
+        Self {
+            start,
+            row_step,
+            col_step,
+        }
+    }
+
+    fn index(&self, row: usize, col: usize) -> usize {
+        (self.start as isize
+            + (self.row_step as isize * row as isize)
+            + (self.col_step as isize * col as isize)) as usize
+    }
+}
+
 impl<'a> RotatedTile<'a> {
     fn new_with_id_in_direction(tile: &'a Tile, id: u16, direction: Direction) -> Self {
         let (flipped, index) = if let Some(index) = tile.edge_ids.iter().position(|&x| x == id) {
@@ -138,9 +161,40 @@ impl<'a> RotatedTile<'a> {
     }
 
     #[cfg(test)]
-
     fn left(&self) -> u16 {
         self.get_id_in_direction(Direction::Left)
+    }
+
+    fn get_indexer(&self) -> Indexer {
+        let (start, row_step, col_step) = match (self.rotation, self.flipped) {
+            (0, false) => (0, 10, 1),
+            (1, false) => (9, -1, 10),
+            (2, false) => (99, -10, -1),
+            (3, false) => (90, 1, -10),
+            (0, true) => (9, 10, -1),
+            (1, true) => (99, -1, -10),
+            (2, true) => (90, -10, 1),
+            (3, true) => (0, 1, 10),
+            c => panic!("bad rotation/flipped: {:?}", c),
+        };
+        Indexer::new(start, row_step, col_step)
+    }
+
+    fn get_index_at_pos(&self, row: usize, col: usize) -> usize {
+        assert!(row < 10);
+        assert!(col < 10);
+
+        self.get_indexer().index(row, col)
+    }
+
+    // rotation:
+    // 0 -> row: x, col 1..=8
+    // 1 -> row 1..=8, col: x
+    // 2 -> row: 8 - x, col 8..=1
+    // 3 -> row: 8..=1, col: 8 - x
+    fn row_iter(&self, row: usize) -> impl Iterator<Item = &bool> {
+        let indexer = self.get_indexer();
+        (1..=8).map(move |col| &self.tile.data[indexer.index(row, col)])
     }
 }
 
@@ -372,6 +426,7 @@ impl TileSet {
         }
 
         debug!(?rotated_tiles);
+
         todo!();
     }
 }
@@ -562,6 +617,103 @@ mod tests {
             assert_eq!(got.right(), want_ids[1], "right");
             assert_eq!(got.down(), want_ids[2], "down");
             assert_eq!(got.left(), want_ids[3], "left");
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_simple_row() -> Result<()> {
+        let input = include_str!("../data/day20_test_simple.txt");
+
+        let tile = Tile::parse(input)?;
+
+        debug!(?tile);
+        debug!(?tile.edge_ids);
+        debug!(?tile.flipped_edge_ids);
+
+        // start
+        // up: 2 (256)
+        // right: 4 (128)
+        // down: (8) 64
+        // left: (16) 32
+        // ........#.
+        // ..........
+        // ..........
+        // ..........
+        // #.........
+        // ..........
+        // ..........
+        // .........#
+        // ..........
+        // ...#......
+
+        // flip
+        // up: flipped, 2 -> 256
+        // right: rotated 4 -> 32
+        // down: flipped, 64 -> 8
+        // left: rotated+flipped -> 32 -> 4
+        // .#........
+        // ..........
+        // ..........
+        // ..........
+        // .........#
+        // ..........
+        // ..........
+        // #.........
+        // ..........
+        // ......#...
+
+        // order:  0 -> 1 -> 2 -> 3
+        // flip y: 0 -> 3 -> 2 -> 1
+        // flip x: 2 -> 1 -> 3 -> 0
+
+        let tests = vec![
+            (false, 0, [2, 4, 64, 32], [0, 1, 2, 9], [10, 11, 12, 19]),
+            (false, 1, [4, 8, 32, 256], [9, 19, 29, 99], [8, 18, 28, 98]),
+            (
+                false,
+                2,
+                [8, 16, 256, 128],
+                [99, 98, 97, 90],
+                [89, 88, 87, 80],
+            ),
+            (false, 3, [16, 2, 128, 64], [90, 80, 70, 0], [91, 81, 71, 1]),
+            (true, 0, [256, 32, 8, 4], [9, 8, 7, 0], [19, 18, 17, 10]),
+            (true, 1, [128, 256, 16, 8], [99, 89, 79, 9], [98, 88, 78, 8]),
+            (
+                true,
+                2,
+                [64, 128, 2, 16],
+                [90, 91, 92, 99],
+                [80, 81, 82, 89],
+            ),
+            (true, 3, [32, 64, 4, 2], [0, 10, 20, 90], [1, 11, 21, 91]),
+        ];
+        for (want_flipped, want_rotation, want_ids, want_indexes_row_0, want_indexes_row_1) in tests
+        {
+            let got = RotatedTile::new_with_id_in_direction(&tile, want_ids[0], Direction::Up);
+            info!(want_flipped, want_rotation, ?want_ids, ?got);
+
+            assert_eq!(got.flipped, want_flipped);
+            assert_eq!(got.rotation, want_rotation);
+            assert_eq!(got.up(), want_ids[0], "up");
+            assert_eq!(got.right(), want_ids[1], "right");
+            assert_eq!(got.down(), want_ids[2], "down");
+            assert_eq!(got.left(), want_ids[3], "left");
+
+            assert_eq!(got.get_index_at_pos(0, 0), want_indexes_row_0[0]);
+            assert_eq!(got.get_index_at_pos(0, 1), want_indexes_row_0[1]);
+            assert_eq!(got.get_index_at_pos(0, 2), want_indexes_row_0[2]);
+            assert_eq!(got.get_index_at_pos(0, 9), want_indexes_row_0[3]);
+
+            assert_eq!(got.get_index_at_pos(1, 0), want_indexes_row_1[0]);
+            assert_eq!(got.get_index_at_pos(1, 1), want_indexes_row_1[1]);
+            assert_eq!(got.get_index_at_pos(1, 2), want_indexes_row_1[2]);
+            assert_eq!(got.get_index_at_pos(1, 9), want_indexes_row_1[3]);
+
+            let row_0 = got.row_iter(0).collect::<Vec<_>>();
+            debug!(?row_0);
         }
 
         Ok(())
