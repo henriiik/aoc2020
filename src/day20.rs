@@ -371,8 +371,8 @@ impl TileSet {
         let mut rotated_tiles = vec![];
         let mut row_start_skip_id = 0;
 
-        let n = self.get_grid_size();
-        for row in 0..n {
+        let grid_size = self.get_grid_size();
+        for row in 0..grid_size {
             assert_eq!(
                 self.find_tiles_with_edge_id(row_start_skip_id, row_start_edge_id)
                     .count(),
@@ -393,7 +393,7 @@ impl TileSet {
 
             rotated_tiles.push(current);
 
-            for col in 1..n {
+            for col in 1..grid_size {
                 let skip_id = current.tile.id;
                 let edge_id = current.get_id_in_direction(Direction::Right);
 
@@ -415,7 +415,9 @@ impl TileSet {
                 current = RotatedTile::new_with_id_in_direction(tile, edge_id, Direction::Left);
 
                 if row > 0 {
-                    let above = rotated_tiles.get_mut(((row - 1) * n) + col).unwrap();
+                    let above = rotated_tiles
+                        .get_mut(((row - 1) * grid_size) + col)
+                        .unwrap();
                     let above_down = above.down();
                     let current_up = current.up();
                     assert_eq!(above_down, current_up);
@@ -425,7 +427,30 @@ impl TileSet {
             }
         }
 
-        debug!(?rotated_tiles);
+        let mut all = Vec::<bool>::new();
+
+        for i in 0..grid_size {
+            let tiles = rotated_tiles.iter().skip(i * grid_size).take(grid_size);
+            for row in 1..=8 {
+                for tile in tiles.clone() {
+                    all.extend(tile.row_iter(row));
+                }
+                println!();
+            }
+        }
+
+        all.iter().enumerate().for_each(|(i, &a)| {
+            if i % (grid_size * 8) == 0 {
+                println!()
+            }
+            if a {
+                print!("#")
+            } else {
+                print!(".")
+            }
+        });
+
+        println!();
 
         todo!();
     }
