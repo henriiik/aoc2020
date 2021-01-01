@@ -64,21 +64,37 @@ impl Debug for Tile {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-struct RotatedTile<'a> {
-    tile: &'a Tile,
+struct Orientation {
     flipped: bool, // we assume that we first rotate to the correct possition and then flip
-    rotation: usize,
+    rotation: usize, // in range 0..=3
+}
+
+impl Orientation {
+    fn get_indexer(&self, side: i16) -> Indexer {
+        let (start, row_step, col_step) = match (self.rotation, self.flipped) {
+            (0, false) => (0, side, 1),                   // (0, 10, 1)
+            (1, false) => (side - 1, -1, side),           // (9, -1, 10)
+            (2, false) => ((side * side) - 1, -side, -1), // (99, -10, -1)
+            (3, false) => (side * (side - 1), 1, -side),  // (90, 1, -10)
+            (0, true) => (side - 1, side, -1),            // (9, 10, -1)
+            (1, true) => ((side * side) - 1, -1, -side),  // (99, -1, -10)
+            (2, true) => (side * (side - 1), -side, 1),   // (90, -10, 1)
+            (3, true) => (0, 1, side),                    // (0, 1, 10)
+            c => panic!("bad rotation/flipped: {:?}", c),
+        };
+        Indexer::new(start, row_step, col_step)
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
 struct Indexer {
-    start: i8,
-    row_step: i8,
-    col_step: i8,
+    start: i16,
+    row_step: i16,
+    col_step: i16,
 }
 
 impl Indexer {
-    fn new(start: i8, row_step: i8, col_step: i8) -> Self {
+    fn new(start: i16, row_step: i16, col_step: i16) -> Self {
         Self {
             start,
             row_step,
@@ -91,9 +107,19 @@ impl Indexer {
             + (self.row_step as isize * row as isize)
             + (self.col_step as isize * col as isize)) as usize
     }
+
+    fn iter(self, side: usize) -> impl Iterator<Item = usize> {
+        (0..side).flat_map(move |row| (0..side).map(move |col| self.index(row, col)))
+    }
 }
 
-impl<'a> RotatedTile<'a> {
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct OrientedTile<'a> {
+    tile: &'a Tile,
+    orientation: Orientation,
+}
+
+impl<'a> OrientedTile<'a> {
     fn new_with_id_in_direction(tile: &'a Tile, id: u16, direction: Direction) -> Self {
         let (flipped, index) = if let Some(index) = tile.edge_ids.iter().position(|&x| x == id) {
             (false, index)
@@ -106,8 +132,6 @@ impl<'a> RotatedTile<'a> {
         let direction_index = direction.into_index();
         let is_even_direction = direction_index & 1 == 0;
 
-        // debug!(flipped, index, direction_index, rotation);
-
         let flipped = flipped != (direction_index > 1);
 
         let mut rotation = (4 + index - direction_index).rem_euclid(4);
@@ -116,10 +140,9 @@ impl<'a> RotatedTile<'a> {
             rotation = (rotation + 2).rem_euclid(4);
         }
 
-        RotatedTile {
+        OrientedTile {
             tile,
-            flipped,
-            rotation,
+            orientation: Orientation { flipped, rotation },
         }
     }
 
@@ -127,20 +150,20 @@ impl<'a> RotatedTile<'a> {
         let direction_index = direction.into_index();
         let is_even_direction = direction_index & 1 == 0;
 
-        let mut index = (direction_index + self.rotation).rem_euclid(4);
+        let mut index = (direction_index + self.orientation.rotation).rem_euclid(4);
 
         debug!(
             ?direction_index,
-            self.rotation, index, is_even_direction, self.flipped
+            self.orientation.rotation, index, is_even_direction, self.orientation.flipped
         );
 
         // if we are flipped, the order of the sides is changed
-        if self.flipped && !is_even_direction {
+        if self.orientation.flipped && !is_even_direction {
             index = (index + 2).rem_euclid(4);
         }
 
         // the down and left directions are normally flipped
-        if self.flipped != (direction_index > 1) {
+        if self.orientation.flipped != (direction_index > 1) {
             self.tile.flipped_edge_ids[index]
         } else {
             self.tile.edge_ids[index]
@@ -166,24 +189,11 @@ impl<'a> RotatedTile<'a> {
     }
 
     fn get_indexer(&self) -> Indexer {
-        let (start, row_step, col_step) = match (self.rotation, self.flipped) {
-            (0, false) => (0, 10, 1),
-            (1, false) => (9, -1, 10),
-            (2, false) => (99, -10, -1),
-            (3, false) => (90, 1, -10),
-            (0, true) => (9, 10, -1),
-            (1, true) => (99, -1, -10),
-            (2, true) => (90, -10, 1),
-            (3, true) => (0, 1, 10),
-            c => panic!("bad rotation/flipped: {:?}", c),
-        };
-        Indexer::new(start, row_step, col_step)
+        self.orientation.get_indexer(10)
     }
 
+    #[cfg(test)]
     fn get_index_at_pos(&self, row: usize, col: usize) -> usize {
-        assert!(row < 10);
-        assert!(col < 10);
-
         self.get_indexer().index(row, col)
     }
 
@@ -386,7 +396,7 @@ impl TileSet {
             debug!(row, col = 0, id = tile.id);
 
             let mut current =
-                RotatedTile::new_with_id_in_direction(tile, row_start_edge_id, Direction::Up);
+                OrientedTile::new_with_id_in_direction(tile, row_start_edge_id, Direction::Up);
 
             row_start_skip_id = current.tile.id;
             row_start_edge_id = current.get_id_in_direction(Direction::Down);
@@ -412,7 +422,7 @@ impl TileSet {
 
                 debug!(row, col, id = tile.id);
 
-                current = RotatedTile::new_with_id_in_direction(tile, edge_id, Direction::Left);
+                current = OrientedTile::new_with_id_in_direction(tile, edge_id, Direction::Left);
 
                 if row > 0 {
                     let above = rotated_tiles
@@ -435,24 +445,144 @@ impl TileSet {
                 for tile in tiles.clone() {
                     all.extend(tile.row_iter(row));
                 }
-                println!();
             }
         }
 
-        all.iter().enumerate().for_each(|(i, &a)| {
-            if i % (grid_size * 8) == 0 {
-                println!()
+        let mut sea = MonsterSea::new(&all, grid_size * 8);
+
+        let monster_count = sea.search_for_mosters();
+        debug!("monster count: {}", monster_count);
+
+        let storm_count = all.iter().filter(|&&a| a).count() - (monster_count * 15);
+        debug!("storm count: {}", storm_count);
+
+        sea.print_sea();
+
+        Ok(storm_count as u64)
+    }
+}
+
+#[derive(Clone, PartialEq, Debug)]
+struct MonsterSea<'a> {
+    data: &'a [bool],
+    width: usize,
+    orientation: Orientation,
+    monster_indexes: Vec<usize>,
+}
+
+impl<'a> MonsterSea<'a> {
+    fn new(data: &'a [bool], width: usize) -> Self {
+        assert_eq!(data.len(), width * width);
+        Self {
+            data,
+            width,
+            orientation: Orientation {
+                flipped: false,
+                rotation: 0,
+            },
+            monster_indexes: Vec::new(),
+        }
+    }
+
+    fn find_monster(&mut self, start: usize, indexer: Indexer) -> bool {
+        let c = indexer.col_step as isize;
+        let r = indexer.row_step as isize;
+        let mut index = start as isize;
+
+        let mut monster_indexes = vec![];
+
+        // for delta in [0, w - 18, 5, 1, 5, 1, 5, 1, 1, w - 18, 3, 3, 3, 3, 3].iter() {
+        for (row_delta, col_delta) in [
+            (0, 0),
+            (1, -18),
+            (0, 5),
+            (0, 1),
+            (0, 5),
+            (0, 1),
+            (0, 5),
+            (0, 1),
+            (0, 1),
+            (1, -18),
+            (0, 3),
+            (0, 3),
+            (0, 3),
+            (0, 3),
+            (0, 3),
+        ]
+        .iter()
+        {
+            index += (row_delta * r) + (col_delta * c);
+
+            if self.data.get(index as usize) != Some(&true) {
+                return false;
             }
-            if a {
-                print!("#")
+
+            monster_indexes.push(index as usize);
+        }
+
+        self.monster_indexes.extend(monster_indexes.into_iter());
+
+        true
+    }
+
+    fn count_monsters(&mut self) -> usize {
+        let indexer = self.orientation.get_indexer(self.width as _);
+        let mut monster_count = 0;
+        for row in 0..(self.width - 2) {
+            // for row in 0..self.width {
+            // a monster requires 3 lines
+            for col in 18..(self.width - 1) {
+                // for col in 0..self.width {
+                // a monster requires 20 cols
+                let index = indexer.index(row, col);
+                if self.find_monster(index, indexer) {
+                    monster_count += 1;
+                    debug!("found monster at: {}", index);
+                }
+            }
+        }
+
+        monster_count
+    }
+
+    fn search_for_mosters(&mut self) -> usize {
+        for &flip in [true, false].iter() {
+            for i in (0..=3).rev() {
+                self.orientation.rotation = i;
+                self.orientation.flipped = flip;
+                debug!(
+                    "looking for monsters in orientation: {:?}",
+                    self.orientation
+                );
+                let monster_count = self.count_monsters();
+                if monster_count > 0 {
+                    return monster_count;
+                }
+            }
+        }
+
+        0
+    }
+
+    fn print_sea(&self) {
+        let indexer = self.orientation.get_indexer(self.width as i16);
+
+        for (i, index) in indexer.iter(self.width).enumerate() {
+            if i % self.width == 0 {
+                println!();
+            }
+            if self.data[index] {
+                if self.monster_indexes.contains(&index) {
+                    print!("O");
+                } else {
+                    print!("#");
+                }
             } else {
-                print!(".")
+                print!(".");
             }
-        });
+        }
 
         println!();
-
-        todo!();
     }
 }
 
@@ -493,7 +623,7 @@ mod tests {
 
         let part_2 = tiles.find_part_2()?;
 
-        assert_eq!(part_2, 20899048083289);
+        assert_eq!(part_2, 273);
 
         Ok(())
     }
@@ -516,9 +646,8 @@ mod tests {
 
         for id in 1..=8 {
             for &d in directions.iter() {
-                let got_tile = RotatedTile::new_with_id_in_direction(tile, id, d);
+                let got_tile = OrientedTile::new_with_id_in_direction(tile, id, d);
                 let got_id = got_tile.get_id_in_direction(d);
-                // debug!(?got_tile);
                 assert_eq!(
                     id, got_id,
                     "should work for id: {}, direction: {:?}, tile: {:?}",
@@ -547,10 +676,9 @@ mod tests {
         ];
 
         for (flipped, rotation, up, right, down, left) in tests {
-            let want = RotatedTile {
+            let want = OrientedTile {
                 tile,
-                flipped,
-                rotation,
+                orientation: Orientation { flipped, rotation },
             };
 
             assert_eq!(want.get_id_in_direction(Direction::Up), up);
@@ -570,42 +698,6 @@ mod tests {
         debug!(?tile.edge_ids);
         debug!(?tile.flipped_edge_ids);
 
-        // start
-        // up: 2 (256)
-        // right: 4 (128)
-        // down: (8) 64
-        // left: (16) 32
-        // ........#.
-        // ..........
-        // ..........
-        // ..........
-        // #.........
-        // ..........
-        // ..........
-        // .........#
-        // ..........
-        // ...#......
-
-        // flip
-        // up: flipped, 2 -> 256
-        // right: rotated 4 -> 32
-        // down: flipped, 64 -> 8
-        // left: rotated+flipped -> 32 -> 4
-        // .#........
-        // ..........
-        // ..........
-        // ..........
-        // .........#
-        // ..........
-        // ..........
-        // #.........
-        // ..........
-        // ......#...
-
-        // order:  0 -> 1 -> 2 -> 3
-        // flip y: 0 -> 3 -> 2 -> 1
-        // flip x: 2 -> 1 -> 3 -> 0
-
         let tests = vec![
             (false, 0, [2, 4, 64, 32]),
             (false, 1, [4, 8, 32, 256]),
@@ -617,25 +709,25 @@ mod tests {
             (true, 3, [32, 64, 4, 2]),
         ];
         for (want_flipped, want_rotation, want_ids) in tests {
-            let got = RotatedTile::new_with_id_in_direction(&tile, want_ids[0], Direction::Up);
+            let got = OrientedTile::new_with_id_in_direction(&tile, want_ids[0], Direction::Up);
             info!(want_flipped, want_rotation, ?want_ids, ?got);
 
-            assert_eq!(got.flipped, want_flipped);
-            assert_eq!(got.rotation, want_rotation);
+            assert_eq!(got.orientation.flipped, want_flipped);
+            assert_eq!(got.orientation.rotation, want_rotation);
 
             assert_eq!(
                 got,
-                RotatedTile::new_with_id_in_direction(&tile, want_ids[1], Direction::Right)
+                OrientedTile::new_with_id_in_direction(&tile, want_ids[1], Direction::Right)
             );
 
             assert_eq!(
                 got,
-                RotatedTile::new_with_id_in_direction(&tile, want_ids[2], Direction::Down)
+                OrientedTile::new_with_id_in_direction(&tile, want_ids[2], Direction::Down)
             );
 
             assert_eq!(
                 got,
-                RotatedTile::new_with_id_in_direction(&tile, want_ids[3], Direction::Left)
+                OrientedTile::new_with_id_in_direction(&tile, want_ids[3], Direction::Left)
             );
 
             assert_eq!(got.up(), want_ids[0], "up");
@@ -656,42 +748,6 @@ mod tests {
         debug!(?tile);
         debug!(?tile.edge_ids);
         debug!(?tile.flipped_edge_ids);
-
-        // start
-        // up: 2 (256)
-        // right: 4 (128)
-        // down: (8) 64
-        // left: (16) 32
-        // ........#.
-        // ..........
-        // ..........
-        // ..........
-        // #.........
-        // ..........
-        // ..........
-        // .........#
-        // ..........
-        // ...#......
-
-        // flip
-        // up: flipped, 2 -> 256
-        // right: rotated 4 -> 32
-        // down: flipped, 64 -> 8
-        // left: rotated+flipped -> 32 -> 4
-        // .#........
-        // ..........
-        // ..........
-        // ..........
-        // .........#
-        // ..........
-        // ..........
-        // #.........
-        // ..........
-        // ......#...
-
-        // order:  0 -> 1 -> 2 -> 3
-        // flip y: 0 -> 3 -> 2 -> 1
-        // flip x: 2 -> 1 -> 3 -> 0
 
         let tests = vec![
             (false, 0, [2, 4, 64, 32], [0, 1, 2, 9], [10, 11, 12, 19]),
@@ -717,11 +773,11 @@ mod tests {
         ];
         for (want_flipped, want_rotation, want_ids, want_indexes_row_0, want_indexes_row_1) in tests
         {
-            let got = RotatedTile::new_with_id_in_direction(&tile, want_ids[0], Direction::Up);
+            let got = OrientedTile::new_with_id_in_direction(&tile, want_ids[0], Direction::Up);
             info!(want_flipped, want_rotation, ?want_ids, ?got);
 
-            assert_eq!(got.flipped, want_flipped);
-            assert_eq!(got.rotation, want_rotation);
+            assert_eq!(got.orientation.flipped, want_flipped);
+            assert_eq!(got.orientation.rotation, want_rotation);
             assert_eq!(got.up(), want_ids[0], "up");
             assert_eq!(got.right(), want_ids[1], "right");
             assert_eq!(got.down(), want_ids[2], "down");
